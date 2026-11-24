@@ -1,5 +1,5 @@
 import { analyzeProject } from "./pattern.mjs";
-import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=gpu-preview";
+import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=thread-1";
 
 const examples = [
   {
@@ -60,8 +60,17 @@ const appearancePicker = id("preview-appearance");
 const placement = id("part-placement");
 const reverse = id("part-reverse");
 const axes = ["x", "y", "z"];
-const scene = createScene(id("model"));
+const scene = createScene(id("model"), hit => {
+  activePart = hit.part;
+  selected = hit.round;
+  picked = hit;
+  picker.value = activePart;
+  renderActivePart();
+});
 const storageKey = "ilmek-atolyesi:draft:v1";
+if (id("model").dataset.renderer === "canvas") {
+  id("model-help").textContent = "Sürükleyerek döndür, renk değiştirmek için listeden bir tur seç.";
+}
 
 function loadDraft() {
   try {
@@ -78,6 +87,7 @@ let parts = [];
 let activePart = "default";
 let rows = [];
 let selected = 0;
+let picked = null;
 let tracking = false;
 let saveTimer;
 
@@ -147,6 +157,7 @@ function renderList() {
 }
 
 function renderSelection() {
+  if (picked?.part !== activePart || picked?.round !== selected) picked = null;
   const valid = rows.filter((row) => row.preview);
   const active = valid.find((row) => row.number === selected);
   const configured = settings();
@@ -157,12 +168,15 @@ function renderSelection() {
     ? "Otomatik · kışlık ayıcık" : "Otomatik";
   scene.update(parts.map((piece) => {
     const saved = settings(piece.id);
-    return { ...piece, colors: saved.colors, offset: saved.offset };
-  }), { part: activePart, round: selected }, appearance);
+    return { ...piece, colors: saved.colors, stitchColors: saved.stitchColors, offset: saved.offset };
+  }), { part: activePart, round: selected, stitch: picked?.stitch ?? 0 }, appearance);
   id("show-all").hidden = !selected;
   yarnColor.disabled = !active;
   id("swatch-label").textContent = active ? active.number + ". turun rengi" : "Renk için tur seç";
-  if (active) yarnColor.value = configured.colors?.[active.number] ?? defaultRoundColor(part, active.number, appearance);
+  id("picked-stitch").textContent = picked ? part.name + " · " + selected + ". tur · " + picked.stitch + ". ilmek" : "";
+  if (picked) id("swatch-label").textContent = picked.stitch + ". ilmeğin rengi";
+  if (active) yarnColor.value = (picked && configured.stitchColors?.[selected]?.[picked.stitch])
+    ?? configured.colors?.[active.number] ?? defaultRoundColor(part, active.number, appearance);
   if (parts.length > 1) {
     for (const axis of axes) id("part-" + axis).value = configured.offset?.[axis] ?? 0;
     reverse.checked = Boolean(configured.offset?.reverse);
@@ -184,6 +198,7 @@ function renderSelection() {
 }
 
 function renderPattern() {
+  picked = null;
   const previousLengths = new Map(parts.map((part) => [part.id, part.rows.filter((row) => row.preview).length]));
   parts = analyzeProject(draft.pattern);
   for (const part of parts) {
@@ -246,6 +261,7 @@ window.addEventListener("pagehide", () => {
 list.addEventListener("click", (event) => {
   const button = event.target.closest("[data-round]");
   if (!button) return;
+  picked = null;
   selected = Number(button.dataset.round);
   renderSelection();
 });
@@ -282,7 +298,15 @@ id("show-all").addEventListener("click", () => {
   renderSelection();
 });
 yarnColor.addEventListener("input", () => {
-  updateSettings({ colors: { ...settings().colors, [selected]: yarnColor.value } });
+  const saved = settings();
+  const stitchColors = { ...saved.stitchColors };
+  if (picked) {
+    stitchColors[selected] = { ...stitchColors[selected], [picked.stitch]: yarnColor.value };
+    updateSettings({ stitchColors });
+  } else {
+    delete stitchColors[selected];
+    updateSettings({ colors: { ...saved.colors, [selected]: yarnColor.value }, stitchColors });
+  }
   renderSelection();
   save();
 });
@@ -290,6 +314,7 @@ id("zoom-out").addEventListener("click", () => scene.zoom(0.83));
 id("zoom-in").addEventListener("click", () => scene.zoom(1.2));
 id("reset-view").addEventListener("click", () => scene.reset());
 id("tracking").addEventListener("click", () => {
+  picked = null;
   tracking = !tracking;
   selected = tracking ? Math.min((settings().progress ?? 0) + 1, rows.filter((row) => row.preview).length) : 0;
   renderSelection();
@@ -297,6 +322,7 @@ id("tracking").addEventListener("click", () => {
 });
 for (const [name, direction] of [["previous-round", -1], ["next-round", 1]]) {
   id(name).addEventListener("click", () => {
+    picked = null;
     const valid = rows.filter((row) => row.preview).length;
     const progress = Math.min(valid, Math.max(0, (settings().progress ?? 0) + direction));
     updateSettings({ progress });

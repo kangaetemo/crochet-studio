@@ -1,3 +1,5 @@
+import { roundPhase, yarnInstances, yarnTemplate } from "./yarn.mjs?v=thread-1";
+
 const TAU = Math.PI * 2;
 const STRIDE = 12;
 
@@ -43,13 +45,13 @@ function addFace(model, vertices, indices) {
   };
   const black = [0.09, 0.073, 0.077];
   for (const angle of [-0.37, 0.37]) {
-    const eye = centerAt(angle, 0.08, 0.12);
+    const eye = centerAt(angle, 0.08, 0.46);
     addEllipsoid(vertices, indices, eye, [0.48, 0.49, 0.31], black);
     addEllipsoid(vertices, indices, [eye[0] - 0.12, eye[1] + 0.13 * flip, eye[2] + 0.29 * flip],
       [0.093, 0.093, 0.052], [0.88, 0.85, 0.81]);
   }
-  addEllipsoid(vertices, indices, centerAt(0, -0.018, 0.13), [0.56, 0.18, 0.19], black);
-  addEllipsoid(vertices, indices, centerAt(0, -0.060, 0.14), [0.10, 0.30, 0.12], black);
+  addEllipsoid(vertices, indices, centerAt(0, -0.018, 0.47), [0.56, 0.18, 0.24], black);
+  addEllipsoid(vertices, indices, centerAt(0, -0.060, 0.45), [0.10, 0.30, 0.16], black);
 }
 
 export function buildSurface(model) {
@@ -62,22 +64,8 @@ export function buildSurface(model) {
   const columns = segments + 1;
   const last = rings.at(-1);
   const closes = model.hasFace || (last.stitches.length <= 6 && last.radius < model.radius * 0.65);
-  const localY = (elevation) => {
-    const fraction = elevation / model.height;
-    const shortened = model.hasFace && fraction > 0.83 ? 0.83 + (fraction - 0.83) * 0.45 : fraction;
-    return (shortened - 0.5) * model.height * model.heightScale;
-  };
-  const phaseStep = model.hasFace ? 0.02 : 0.085;
-  let phase = 0;
-  if (model.hasFace) {
-    const row = rings.findIndex((ring) => ring.stitches.filter((stitch) => stitch.name === "bobble").length === 2);
-    if (row >= 0) {
-      const stitches = rings[row].stitches;
-      const points = stitches.flatMap((stitch, index) => stitch.name === "bobble" ? [TAU * index / stitches.length] : []);
-      const mean = Math.atan2(Math.sin(points[0]) + Math.sin(points[1]), Math.cos(points[0]) + Math.cos(points[1]));
-      phase = (model.position.flipped ? -1 : 1) * Math.PI / 2 - mean - phaseStep * row;
-    }
-  }
+  const localY = elevation => (elevation - model.height / 2) * model.heightScale;
+  const { step: phaseStep, start: phase } = roundPhase(model);
 
   for (const [index, ring] of rings.entries()) {
     const previous = rings[index - 1];
@@ -92,7 +80,7 @@ export function buildSurface(model) {
     for (let band = 0; band <= 2; band++) {
       const t = band / 2;
       const y = bottomY + t * tall;
-      const radius = band === 0 ? bottom : band === 1 ? ring.radius : top;
+      const radius = band === 0 ? bottom : band === 1 ? (bottom + 2 * ring.radius + top) / 4 : top;
       const slope = (band === 0 ? (ring.radius - bottom) * 2 : band === 2 ? (top - ring.radius) * 2 : top - bottom) / tall;
       for (let column = 0; column <= segments; column++) {
         const angle = TAU * column / segments;
@@ -124,6 +112,12 @@ layout(location=1) in vec3 a_normal;
 layout(location=2) in vec3 a_color;
 layout(location=3) in vec2 a_stitch;
 layout(location=4) in float a_round;
+layout(location=5) in vec4 a_angles;
+layout(location=6) in vec4 a_row;
+layout(location=7) in vec4 a_detail;
+uniform bool u_yarn;
+uniform int u_firstId;
+flat out int v_id;
 uniform vec3 u_offset;
 uniform vec3 u_center;
 uniform vec4 u_pose;
@@ -143,30 +137,70 @@ vec3 orbit(vec3 p) {
   return vec3(x,p.y*u_camera.z+z*u_camera.w,z*u_camera.z-p.y*u_camera.w);
 }
 void main() {
-  vec3 p = orbit(place(a_position)+u_offset-u_center);
+  vec3 position = a_position, normal = a_normal;
+  float roundNumber = a_round;
+  v_id = 0;
+  if (u_yarn) {
+    float t = a_position.y;
+    float angle = a_angles.x + a_angles.y * (1.0-t) +
+      a_position.x * a_row.z * mix(a_row.w, 1.0, t);
+    float bulge = sin(clamp(t,0.0,1.0)*3.141593);
+    float radius = mix(a_angles.z,a_angles.w,t) + 0.10 + a_position.z +
+      a_detail.y*bulge + a_detail.z;
+    vec3 radial = vec3(cos(angle),0.0,sin(angle));
+    vec3 tangent = vec3(-radial.z,0.0,radial.x);
+    position = radial*radius;
+    position.y = a_row.x + a_row.y * (1.0 + (t-1.0)*a_detail.w);
+    normal = normalize(tangent*a_normal.x + vec3(0.0,a_normal.y,0.0) + radial*a_normal.z);
+    roundNumber = a_detail.x;
+    v_id = u_firstId + gl_InstanceID;
+  }
+  vec3 p = orbit(place(position)+u_offset-u_center);
   float depth = p.z/u_lens.z;
   gl_Position = vec4(p.x*u_lens.x,p.y*u_lens.y,-depth,1.0-depth);
-  v_normal = orbit(place(a_normal));
+  v_normal = orbit(place(normal));
   v_color = a_color;
   v_stitch = a_stitch;
-  v_round = a_round;
+  v_round = roundNumber;
 }
 `;
 
 const fragmentSource = `#version 300 es
 precision highp float;
+precision highp int;
 in vec3 v_normal;
 in vec3 v_color;
 in vec2 v_stitch;
 flat in float v_round;
 uniform float u_active;
+uniform int u_selectedStitch;
+uniform bool u_yarn;
+uniform bool u_picking;
+uniform bool u_detailed;
+flat in int v_id;
+uniform int u_firstId;
+uniform ivec2 u_ranges[151];
+uniform highp sampler2D u_colors;
 out vec4 color;
 void main() {
+  int row = int(v_round);
+  ivec2 range = u_ranges[row];
+  int size = max(1,range.y);
+  int column = u_yarn ? v_id-u_firstId-range.x : ((int(floor(v_stitch.x))%size)+size)%size;
+  if (u_picking) {
+    int id = row > 0 ? u_firstId+range.x+column : 0;
+    color = vec4(float(id & 255), float((id >> 8) & 255), float((id >> 16) & 255), 255.0)/255.0;
+    return;
+  }
   vec3 normal = normalize(v_normal);
   vec3 key = normalize(vec3(-0.42,0.58,0.70));
   float light = 0.72 + max(0.0,dot(normal,key))*0.32;
   float cloth = 1.0;
-  if (v_round > 0.0) {
+  if (u_yarn) {
+    light = 0.67 + max(0.0,dot(normal,key))*0.39;
+  } else if (u_detailed && v_round > 0.0) {
+    cloth = 0.94;
+  } else if (v_round > 0.0) {
     vec2 p = vec2(fract(v_stitch.x)-0.5,v_stitch.y);
     float vein = abs(abs(p.x)-(0.13+0.23*p.y));
     float join = smoothstep(0.02,0.23,p.y)*(1.0-smoothstep(0.84,1.0,p.y));
@@ -177,7 +211,10 @@ void main() {
   } else {
     light += 0.32*pow(max(0.0,dot(normal,key)),16.0);
   }
-  vec3 shaded = v_color*light*cloth;
+  vec3 yarnColor = row > 0 ? texelFetch(u_colors,ivec2(column,row),0).rgb : v_color;
+  vec3 shaded = yarnColor*light*cloth;
+  if (row > 0 && v_round == u_active && column+1 == u_selectedStitch)
+    shaded = mix(shaded, vec3(0.75,0.46,0.85), 0.24);
   if (u_active > 0.0 && v_round > u_active) shaded = mix(shaded, vec3(0.91,0.88,0.94), 0.63);
   color = vec4(shaded,1.0);
 }
@@ -206,7 +243,37 @@ function initProgram(gl) {
   }
 }
 
-function createBuffer(gl, model) {
+function uploadTemplate(gl, mesh) {
+  const vertex = gl.createBuffer(), index = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vertex);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+  return { vertex, index, count: mesh.indices.length };
+}
+
+function createYarnBuffer(gl, model, template) {
+  const { data, count } = yarnInstances(model);
+  const vao = gl.createVertexArray(), instances = gl.createBuffer();
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, template.vertex);
+  for (const slot of [0, 1]) {
+    gl.enableVertexAttribArray(slot);
+    gl.vertexAttribPointer(slot, 3, gl.FLOAT, false, 24, slot * 12);
+  }
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, template.index);
+  gl.bindBuffer(gl.ARRAY_BUFFER, instances);
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  for (let i = 0; i < 3; i++) {
+    gl.enableVertexAttribArray(5+i);
+    gl.vertexAttribPointer(5+i, 4, gl.FLOAT, false, 48, i*16);
+    gl.vertexAttribDivisor(5+i, 1);
+  }
+  gl.bindVertexArray(null);
+  return { vao, instances, count, template };
+}
+
+function createBuffer(gl, model, template) {
   const { vertices, indices } = buildSurface(model);
   const vao = gl.createVertexArray();
   const vertex = gl.createBuffer();
@@ -221,7 +288,41 @@ function createBuffer(gl, model) {
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
   gl.bindVertexArray(null);
-  return { vao, vertex, index, count: indices.length, geometry: model.rings, flip: model.position.flipped };
+  const yarn = template ? createYarnBuffer(gl, model, template) : null;
+  const ranges = new Int32Array(151*2), ends = [];
+  let loops = 0;
+  for (const ring of model.rings) {
+    ranges.set([loops,ring.stitches.length],ring.row.number*2);
+    loops += ring.stitches.length;
+    ends.push(loops);
+  }
+  return { vao, vertex, index, texture:gl.createTexture(), ranges, ends, loops, count: indices.length, source: model.source, appearance: model.appearance,
+    flip: model.position.flipped, yarn };
+}
+
+function updateColorTexture(gl, buffer, model) {
+  if (buffer.colorsReady && buffer.colors === model.colors && buffer.stitchColors === model.stitchColors) return;
+  const width = Math.max(...model.rings.map(r => r.stitches.length));
+  const height = model.rings.at(-1).row.number+1;
+  const pixels = new Uint8Array(width*height*4);
+  for (const ring of model.rings) {
+    const row = ring.row.number;
+    for (let i=0; i<ring.stitches.length; i++) {
+      const start = 4*(row*width+i), hex = model.stitchColors?.[row]?.[i+1];
+      const rgb = hex ? parseInt(hex.slice(1),16) : null;
+      pixels[start] = hex ? rgb >> 16 : ring.material[0];
+      pixels[start+1] = hex ? (rgb >> 8)&255 : ring.material[1];
+      pixels[start+2] = hex ? rgb&255 : ring.material[2];
+      pixels[start+3] = 255;
+    }
+  }
+  gl.bindTexture(gl.TEXTURE_2D,buffer.texture);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+  buffer.colors = model.colors;
+  buffer.stitchColors = model.stitchColors;
+  buffer.colorsReady = true;
 }
 
 export function createWebglRenderer(canvas, schedule) {
@@ -232,15 +333,36 @@ export function createWebglRenderer(canvas, schedule) {
   let selection = {};
   let program, uniforms, lost = false;
 
+  let fine, coarse, pickTarget, pickColor, pickDepth;
+
   function initialize() {
     program = initProgram(gl);
-    uniforms = Object.fromEntries(["offset", "center", "pose", "camera", "lens", "active"]
+    uniforms = Object.fromEntries(["offset", "center", "pose", "camera", "lens", "active", "selectedStitch", "ranges[0]", "firstId", "yarn", "picking", "detailed"]
       .map((name) => [name, gl.getUniformLocation(program, "u_" + name)]));
+    fine = uploadTemplate(gl, yarnTemplate());
+    coarse = uploadTemplate(gl, yarnTemplate(12, 4));
+    pickTarget = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pickTarget);
+    pickColor = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, pickColor);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, 1, 1);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, pickColor);
+    pickDepth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, pickDepth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, 1, 1);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, pickDepth);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.disable(gl.DITHER);
     gl.enable(gl.DEPTH_TEST);
     gl.clearColor(0, 0, 0, 0);
   }
 
   function release(buffer) {
+    gl.deleteTexture(buffer.texture);
+    if (buffer.yarn) {
+      gl.deleteBuffer(buffer.yarn.instances);
+      gl.deleteVertexArray(buffer.yarn.vao);
+    }
     gl.deleteBuffer(buffer.vertex);
     gl.deleteBuffer(buffer.index);
     gl.deleteVertexArray(buffer.vao);
@@ -256,15 +378,20 @@ export function createWebglRenderer(canvas, schedule) {
       release(buffer);
       buffers.delete(id);
     }
+    const total = models.reduce((sum, m) => sum + m.rings.reduce((n,r) => n+r.stitches.length, 0), 0);
+    const template = total <= 2400 ? fine : total <= 16000 ? coarse : null;
     for (const model of models) {
       const existing = buffers.get(model.id);
-      if (existing?.geometry === model.rings && existing.flip === model.position.flipped) continue;
-      if (existing) release(existing);
-      buffers.set(model.id, createBuffer(gl, model));
+      if (!existing || existing.source !== model.source || existing.appearance !== model.appearance ||
+          existing.flip !== model.position.flipped || (existing.yarn?.template ?? null) !== template) {
+        if (existing) release(existing);
+        buffers.set(model.id, createBuffer(gl, model, template));
+      }
+      updateColorTexture(gl,buffers.get(model.id),model);
     }
   }
 
-  function draw(view) {
+  function draw(view, pixel = null) {
     if (lost) return;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -276,7 +403,7 @@ export function createWebglRenderer(canvas, schedule) {
       canvas.width = w;
       canvas.height = h;
     }
-    gl.viewport(0, 0, w, h);
+    gl.viewport(pixel ? -pixel[0] : 0, pixel ? -pixel[1] : 0, w, h);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (!models.length) return;
 
@@ -305,17 +432,32 @@ export function createWebglRenderer(canvas, schedule) {
     const size = Math.max(vertical, radius * 2, 4);
     const scale = Math.min(width * 0.66, height * 0.77) / size * view.zoom;
     gl.useProgram(program);
+    gl.uniform1i(uniforms.picking, Boolean(pixel));
+    let firstId = 1;
     gl.uniform3f(uniforms.center, ...center);
     gl.uniform4f(uniforms.camera, Math.cos(view.yaw), Math.sin(view.yaw), Math.cos(view.pitch), Math.sin(view.pitch));
     gl.uniform3f(uniforms.lens, 2 * scale / width, 2 * scale / height, size * 3.2);
     for (const model of models) {
       const { x, y, z, tilt, flipped } = model.position;
       const buffer = buffers.get(model.id);
+      gl.bindTexture(gl.TEXTURE_2D,buffer.texture);
+      gl.uniform2iv(uniforms["ranges[0]"],buffer.ranges);
+      gl.uniform1i(uniforms.firstId, firstId);
+      gl.uniform1i(uniforms.yarn, false);
+      gl.uniform1i(uniforms.detailed, Boolean(buffer.yarn));
       gl.bindVertexArray(buffer.vao);
       gl.uniform3f(uniforms.offset, x, y, z);
       gl.uniform4f(uniforms.pose, Math.cos(tilt), Math.sin(tilt), flipped ? -1 : 1, 0);
       gl.uniform1f(uniforms.active, model.id === selection.part ? selection.round : 0);
+      gl.uniform1i(uniforms.selectedStitch, selection.stitch || 0);
       gl.drawElements(gl.TRIANGLES, buffer.count, gl.UNSIGNED_INT, 0);
+      if (buffer.yarn) {
+        const yarn = buffer.yarn;
+        gl.uniform1i(uniforms.yarn, true);
+        gl.bindVertexArray(yarn.vao);
+        gl.drawElementsInstanced(gl.TRIANGLES, yarn.template.count, gl.UNSIGNED_SHORT, 0, yarn.count);
+      }
+      firstId += buffer.loops;
     }
     gl.bindVertexArray(null);
   }
@@ -332,5 +474,32 @@ export function createWebglRenderer(canvas, schedule) {
     update(models, selection);
     schedule();
   });
-  return { update, draw };
+  function pick(view, clientX, clientY) {
+    if (lost || !models.length) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = Math.floor((clientX-rect.left)*canvas.width/rect.width);
+    const y = canvas.height-1-Math.floor((clientY-rect.top)*canvas.height/rect.height);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pickTarget);
+    const pixel = new Uint8Array(4);
+    try {
+      draw(view, [x,y]);
+      gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0,0,canvas.width,canvas.height);
+    }
+    let index = pixel[0] + 256*pixel[1] + 65536*pixel[2] - 1;
+    if (index < 0) return null;
+    for (const model of models) {
+      const buffer = buffers.get(model.id);
+      if (index < buffer.loops) {
+        const row = buffer.ends.findIndex(end => index < end);
+        return { part: model.id, round: model.rings[row].row.number, stitch: index-(buffer.ends[row-1] ?? 0)+1 };
+      }
+      index -= buffer.loops;
+    }
+    return null;
+  }
+  return { update, draw, pick };
 }

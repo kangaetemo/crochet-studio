@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { analyzePattern, analyzeProject } from "./docs/pattern.mjs";
 import { layoutParts, defaultRoundColor, resolveAppearance } from "./docs/scene.mjs";
 import { buildSurface } from "./docs/renderer-gl.mjs";
+import { yarnInstances, yarnTemplate } from "./docs/yarn.mjs";
 
 test("parses each requested stitch, including both explicit reductions", () => {
   const cases = [
@@ -144,3 +145,28 @@ test("builds bounded, closed surface geometry from valid rounds", () => {
   assert.equal(geometry.indices.length % 3, 0);
   assert.equal(Math.hypot(geometry.vertices.at(-12), geometry.vertices.at(-10)), 0);
 });
+
+test("two-ply mesh is reusable and contains only finite, indexed geometry", () => {
+  for (const [steps, sides] of [[32,6],[12,4]]) {
+    const {vertices,indices} = yarnTemplate(steps,sides);
+    assert.equal(vertices.length/6,2*(steps+1)*sides);
+    assert.equal(indices.length,2*steps*sides*6);
+    assert.ok(vertices.every(Number.isFinite));
+    assert.ok(indices.every(i => i < vertices.length/6));
+  }
+});
+
+test("increases share their parent and skips advance the following stitch's base", () => {
+  const rows = analyzePattern("4 sc\ninc, sk, 2 sc\ndec, 2 sc");
+  assert.ok(rows.every(r => r.preview));
+  const rings = rows.map((row,i) => ({ row, height:i+1, radius:row.made/(2*Math.PI),
+    stitches:row.stitches.flatMap(s => Array(s.made).fill(s)) }));
+  const {data,count} = yarnInstances({rings,height:3,heightScale:1,radius:1});
+  assert.equal(count,11);
+  assert.ok(data.every(Number.isFinite));
+  const parentAngle = i => data[12*i] + data[12*i+1];
+  assert.ok(Math.abs(parentAngle(4)-parentAngle(5)) < 1e-6);
+  assert.ok(Math.abs(parentAngle(6)-Math.PI) < 1e-6);
+  assert.ok(Math.abs(parentAngle(8)-(0.085+Math.PI/4)) < 1e-6);
+});
+

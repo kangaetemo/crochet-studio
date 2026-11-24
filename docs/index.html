@@ -7,7 +7,7 @@
   <meta name="description" content="Amigurumi tarifini yaz, ilmeklerini kontrol et ve şeklini 3B olarak gör.">
   <title>İlmek Atölyesi</title>
   <link rel="stylesheet" href="./style.css">
-  <script type="module" src="./app.mjs?v=gpu-preview"></script>
+  <script type="module" src="./app.mjs?v=thread-1"></script>
 </head>
 <body>
   <header class="topbar">
@@ -55,7 +55,7 @@
         <div class="panel-header">
           <div>
             <h2 id="preview-heading">3B önizleme</h2>
-            <p>Modeli sürükleyerek döndür.</p>
+            <p><span id="model-help">Sürükleyerek döndür, boyamak istediğin ilmeğe dokun.</span> <span id="picked-stitch" role="status"></span></p>
           </div>
           <span id="preview-state" class="preview-state"></span>
         </div>

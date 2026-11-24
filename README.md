@@ -19,4 +19,4 @@ docs/ klasörünü herhangi bir statik web sunucusuyla sun. Paket kurulumu ve de
 
 `node --test pattern.test.mjs`
 
-3B önizleme şu anda tur bazlı, yaklaşık bir şekil gösterir. Gövde, kulak ve şapka başlıkları için başlangıç konumları hesaplanır. Parça yerleşimi ve renkleri tarayıcıya kaydedilir. Kışlık ayıcık görünümü, uyumlu şapkalı tariflere yaklaşık gövde oranları, renkler ve yüz detayları ekler.
+WebGL 2 önizlemesinde her ilmeğin tabanı önceki turda kullandığı ilmeklere bağlanır. Modelde bir ilmeğe dokunarak turunu seçebilir ve yalnızca o ilmeği boyayabilirsin. Listeden seçilen turun rengi değiştirildiğinde o turun tamamı boyanır. Büyük tariflerde çizim ayrıntısı otomatik azalır. WebGL 2 yoksa basit tuval görünümü kullanılır. Gövde, kulak ve şapka başlıkları için başlangıç konumları hesaplanır. Parça yerleşimi ve renkleri tarayıcıya kaydedilir. Kışlık ayıcık görünümü, uyumlu şapkalı tariflere yaklaşık gövde oranları, renkler ve yüz detayları ekler.

@@ -1,4 +1,4 @@
-import { createWebglRenderer } from "./renderer-gl.mjs?v=gpu-preview";
+import { createWebglRenderer } from "./renderer-gl.mjs?v=thread-1";
 
 const TAU = Math.PI * 2;
 
@@ -51,7 +51,7 @@ export function layoutParts(parts, appearance = "plain") {
   const dimensions = parts.map((part) => {
     const rounds = part.rows.filter((row) => row.preview);
     const kind = partKind(part.name);
-    const heightScale = winter && kind === "body" ? 0.61 : winter && kind === "hat" ? 0.88 : 1;
+    const heightScale = winter && kind === "body" ? 0.82 : winter && kind === "hat" ? 0.88 : 1;
     const widthScale = winter && kind === "ear" ? 1.14 : 1;
     return {
       id: part.id, kind, heightScale, widthScale,
@@ -92,7 +92,7 @@ export function layoutParts(parts, appearance = "plain") {
   }));
 }
 
-export function createScene(canvas) {
+export function createScene(canvas, onPick) {
   let gpu;
   try {
     gpu = createWebglRenderer(canvas, schedule);
@@ -142,6 +142,20 @@ export function createScene(canvas) {
             material: yarnMaterial(part.colors?.[row.number] ?? defaultRoundColor(part, row.number, appearance))
           };
         });
+        // Stuffed, closed pieces ease between round widths; open cuffs retain their rim.
+        if (rings.length >= 5 && rings.at(-1).stitches.length <= 6 && rings.at(-1).radius < Math.max(...rings.map(r => r.radius))*0.7) {
+          const radii = rings.map(r => r.radius);
+          for (let i=1; i<rings.length-1; i++) {
+            const sample = j => radii[Math.max(0, Math.min(radii.length-1, j))];
+            rings[i].radius = (sample(i-2) + 3*sample(i-1) + 4*sample(i) + 3*sample(i+1) + sample(i+2))/12;
+          }
+          // At a closed pole some of each round's yarn runs outward instead of up.
+          // Ease the end caps into the side wall while preserving total piece height.
+          for (const ring of rings) {
+            const t = ring.height / height;
+            ring.height = height * (0.32*t + 0.68*(1 - Math.cos(Math.PI*t))/2);
+          }
+        }
       }
       const position = {
         x: base.x + (part.offset?.x ?? 0),
@@ -151,7 +165,7 @@ export function createScene(canvas) {
         flipped: base.flipped !== Boolean(part.offset?.reverse)
       };
       return {
-        id: part.id, rings, height: rings.at(-1)?.height ?? 0, position, winter, hasFace,
+        id: part.id, rings, stitchColors: part.stitchColors, height: rings.at(-1)?.height ?? 0, position, winter, hasFace,
         source: part.rows, colors: part.colors, appearance, heightScale: base.heightScale,
         radius: rings.reduce((max, ring) => Math.max(max, ring.radius), 0.55)
       };
@@ -285,7 +299,8 @@ export function createScene(canvas) {
           const shadeAngle = flip * angle + view.yaw;
           const light = 0.87 + 0.16 * Math.sin(shadeAngle) - 0.08 * Math.cos(shadeAngle);
           const faded = model.id === activePart && activeRound && ring.row.number > activeRound;
-          marks.push({ v, center, light, material: ring.material, faded, bump, winter: model.winter });
+          const color = model.stitchColors?.[ring.row.number]?.[stitchIndex+1];
+          marks.push({ v, center, light, material: color ? yarnMaterial(color) : ring.material, faded, bump, winter: model.winter });
         }
       }
 
@@ -376,19 +391,26 @@ export function createScene(canvas) {
 
   canvas.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || drag) return;
-    drag = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, moved: false, pointerId: event.pointerId };
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("dragging");
   });
   canvas.addEventListener("pointermove", (event) => {
     if (drag?.pointerId !== event.pointerId) return;
+    drag.moved ||= Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY) > 4;
+    if (!drag.moved) return;
     rotate((event.clientX - drag.x) * 0.012, (event.clientY - drag.y) * 0.012);
     drag.x = event.clientX;
     drag.y = event.clientY;
   });
   function release(event) {
     if (drag?.pointerId !== event.pointerId) return;
+    const tap = event.type === "pointerup" && !drag.moved;
     drag = undefined;
+    if (tap && onPick) {
+      const hit = gpu?.pick(view, event.clientX, event.clientY);
+      if (hit) onPick(hit);
+    }
     canvas.classList.remove("dragging");
   }
   canvas.addEventListener("pointerup", release);
