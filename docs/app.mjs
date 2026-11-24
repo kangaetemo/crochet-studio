@@ -1,5 +1,5 @@
 import { analyzeProject } from "./pattern.mjs";
-import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=winter-preview";
+import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=gpu-preview";
 
 const examples = [
   {

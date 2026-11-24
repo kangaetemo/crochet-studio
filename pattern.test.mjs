@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzePattern, analyzeProject } from "./docs/pattern.mjs";
 import { layoutParts, defaultRoundColor, resolveAppearance } from "./docs/scene.mjs";
+import { buildSurface } from "./docs/renderer-gl.mjs";
 
 test("parses each requested stitch, including both explicit reductions", () => {
   const cases = [
@@ -127,4 +128,19 @@ test("recognizes the winter assembly and places its details without changing cou
   assert.equal(defaultRoundColor(hat, 3, "winter"), "#f6eee0");
   assert.notEqual(defaultRoundColor(hat, 3, "winter"), defaultRoundColor(hat, 4, "winter"));
   assert.deepEqual(hat.rows.map((row) => row.made), [4, 8, 4, 8, 8]);
+});
+
+test("builds bounded, closed surface geometry from valid rounds", () => {
+  const rounds = analyzePattern("R1: 6 sc\nR2: 6 inc\nR3: 12 sc\nR4: 6 dec");
+  const rings = rounds.map((row, i) => ({
+    row, stitches: row.stitches.flatMap((stitch) => Array(stitch.made).fill(stitch)),
+    radius: row.made / (2 * Math.PI), height: i + 1, material: [210, 175, 190]
+  }));
+  const geometry = buildSurface({ rings, height: 4, heightScale: 1, radius: rings[1].radius, hasFace: false });
+  const numberOfVertices = geometry.vertices.length / 12;
+  assert.ok(numberOfVertices <= rings.length * 97 * 3);
+  assert.ok(geometry.vertices.every(Number.isFinite));
+  assert.ok(geometry.indices.every((index) => index < numberOfVertices));
+  assert.equal(geometry.indices.length % 3, 0);
+  assert.equal(Math.hypot(geometry.vertices.at(-12), geometry.vertices.at(-10)), 0);
 });

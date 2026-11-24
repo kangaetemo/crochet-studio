@@ -1,3 +1,5 @@
+import { createWebglRenderer } from "./renderer-gl.mjs?v=gpu-preview";
+
 const TAU = Math.PI * 2;
 
 function yarnMaterial(color) {
@@ -91,7 +93,16 @@ export function layoutParts(parts, appearance = "plain") {
 }
 
 export function createScene(canvas) {
-  const context = canvas.getContext("2d");
+  let gpu;
+  try {
+    gpu = createWebglRenderer(canvas, schedule);
+  } catch {
+    const fallback = canvas.cloneNode(false);
+    canvas.replaceWith(fallback);
+    canvas = fallback;
+  }
+  const context = gpu ? null : canvas.getContext("2d");
+  canvas.dataset.renderer = gpu ? "webgl2" : "canvas";
   const view = { pitch: 0.22, yaw: -0.35, zoom: 1 };
   let models = [];
   let activePart;
@@ -113,20 +124,25 @@ export function createScene(canvas) {
     activePart = selection.part;
     activeRound = selection.round;
     const layout = layoutParts(parts, appearance);
+    const previous = new Map(models.map((model) => [model.id, model]));
     models = parts.map((part) => {
       const base = layout.get(part.id);
       const winter = appearance === "winter";
       const hasFace = winter && partKind(part.name) === "body";
-      let height = 0;
-      const rings = part.rows.filter((row) => row.preview).map((row) => {
-        height += row.height;
-        const stitches = row.stitches.flatMap((stitch) => Array.from({ length: stitch.made }, () => stitch));
-        return {
-          row, height, stitches,
-          radius: Math.max(0.55, stitches.length / TAU) * base.widthScale,
-          material: yarnMaterial(part.colors?.[row.number] ?? defaultRoundColor(part, row.number, appearance))
-        };
-      });
+      const old = previous.get(part.id);
+      let rings = old?.rings;
+      if (old?.source !== part.rows || old.colors !== part.colors || old.appearance !== appearance) {
+        let height = 0;
+        rings = part.rows.filter((row) => row.preview).map((row) => {
+          height += row.height;
+          const stitches = row.stitches.flatMap((stitch) => Array.from({ length: stitch.made }, () => stitch));
+          return {
+            row, height, stitches,
+            radius: Math.max(0.55, stitches.length / TAU) * base.widthScale,
+            material: yarnMaterial(part.colors?.[row.number] ?? defaultRoundColor(part, row.number, appearance))
+          };
+        });
+      }
       const position = {
         x: base.x + (part.offset?.x ?? 0),
         y: base.y + (part.offset?.y ?? 0),
@@ -135,11 +151,12 @@ export function createScene(canvas) {
         flipped: base.flipped !== Boolean(part.offset?.reverse)
       };
       return {
-        id: part.id, rings, height, position, winter, hasFace,
-        heightScale: base.heightScale,
+        id: part.id, rings, height: rings.at(-1)?.height ?? 0, position, winter, hasFace,
+        source: part.rows, colors: part.colors, appearance, heightScale: base.heightScale,
         radius: rings.reduce((max, ring) => Math.max(max, ring.radius), 0.55)
       };
     }).filter((model) => model.rings.length);
+    gpu?.update(models, selection);
     schedule();
   }
 
@@ -149,11 +166,15 @@ export function createScene(canvas) {
 
   function draw() {
     frame = 0;
+    if (gpu) {
+      gpu.draw(view);
+      return;
+    }
     if (!context) return;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (!width || !height) return;
-    const pixelRatio = Math.min(devicePixelRatio || 1, 2);
+    const pixelRatio = Math.min(devicePixelRatio || 1, 1.5);
     if (canvas.width !== Math.round(width * pixelRatio) || canvas.height !== Math.round(height * pixelRatio)) {
       canvas.width = Math.round(width * pixelRatio);
       canvas.height = Math.round(height * pixelRatio);
@@ -210,6 +231,8 @@ export function createScene(canvas) {
     context.restore();
 
     const marks = [];
+    const visibleStitches = models.reduce((total, model) => total + model.rings.reduce((n, ring) => n + ring.stitches.length, 0), 0);
+    const firstStep = Math.max(1, Math.ceil(visibleStitches / 1400));
     for (const model of models) {
       const { position, rings } = model;
       const cosTilt = Math.cos(position.tilt);
@@ -243,7 +266,8 @@ export function createScene(canvas) {
         const step = TAU / ring.stitches.length;
         const bottomRadius = (ring.radius + (rings[index - 1]?.radius ?? ring.radius * 0.5)) * 0.5;
         const topRadius = (ring.radius + (rings[index + 1]?.radius ?? ring.radius * 0.66)) * 0.5;
-        for (const [stitchIndex, stitch] of ring.stitches.entries()) {
+        for (let stitchIndex = 0; stitchIndex < ring.stitches.length; stitchIndex += firstStep) {
+          const stitch = ring.stitches[stitchIndex];
           const angle = step * stitchIndex + index * phaseStep + phase;
           const top = ring.height;
           const bottom = top - ring.row.height * 0.89;
@@ -351,22 +375,25 @@ export function createScene(canvas) {
   }
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    drag = { x: event.clientX, y: event.clientY };
+    if (event.button !== 0 || drag) return;
+    drag = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
     canvas.setPointerCapture(event.pointerId);
     canvas.classList.add("dragging");
   });
   canvas.addEventListener("pointermove", (event) => {
-    if (!drag) return;
+    if (drag?.pointerId !== event.pointerId) return;
     rotate((event.clientX - drag.x) * 0.012, (event.clientY - drag.y) * 0.012);
-    drag = { x: event.clientX, y: event.clientY };
+    drag.x = event.clientX;
+    drag.y = event.clientY;
   });
-  function release() {
+  function release(event) {
+    if (drag?.pointerId !== event.pointerId) return;
     drag = undefined;
     canvas.classList.remove("dragging");
   }
   canvas.addEventListener("pointerup", release);
   canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("lostpointercapture", release);
   canvas.addEventListener("wheel", (event) => {
     if (!event.ctrlKey && document.activeElement !== canvas) return;
     event.preventDefault();
