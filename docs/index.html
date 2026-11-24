@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#faf7f2">
+  <meta name="description" content="Amigurumi tarifini yaz, ilmeklerini kontrol et ve şeklini 3B olarak gör.">
+  <title>İlmek Atölyesi</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-icon" aria-hidden="true">∞</span> İlmek Atölyesi</a>
+    <div class="top-actions">
+      <span id="save-status" class="save-status" aria-live="polite"></span>
+      <button type="button" id="download" class="button secondary">Tarifi indir <span aria-hidden="true">↓</span></button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="intro">
+      <div>
+        <label class="sr-only" for="title">Tarif adı</label>
+        <h1><input id="title" type="text" maxlength="90" autocomplete="off"></h1>
+        <p>Tarifi yaz, ilmekleri kontrol et, şeklini gör.</p>
+      </div>
+      <div class="toolbar" aria-label="Tarif araçları">
+        <button id="load-example" class="button secondary" type="button">Örnek değiştir</button>
+        <button id="tracking" class="button primary" type="button" aria-pressed="false">Örgü modu <span aria-hidden="true">›</span></button>
+      </div>
+    </div>
+
+    <div class="workspace">
+      <section class="panel editor" aria-labelledby="editor-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="editor-heading">Tarif</h2>
+            <p>Her satıra bir tur yaz veya bir tarif yapıştır.</p>
+          </div>
+        </div>
+        <label for="pattern" class="sr-only">Tarif metni</label>
+        <textarea id="pattern" spellcheck="false" wrap="off" autocapitalize="off" maxlength="20000" rows="13"></textarea>
+        <details class="syntax">
+          <summary>Desteklenen yazımlar</summary>
+          <p><code>sc</code>, <code>inc</code>, <code>dec</code>, <code>hdc</code>, <code>dc</code>, <code>slst</code>, <code>bob</code>, <code>FLO</code>, <code>BLO</code>, <code>hdc inc</code>, <code>hdc dec</code>, <code>dc inc</code>, <code>dc dec</code></p>
+          <p><code>X</code>, <code>V</code>, <code>A</code>, <code>SH</code>, <code>hdc2tog</code>, <code>dc2tog</code> ve <code>ch</code> da kullanılabilir.</p>
+          <p><code>R3: (sc, inc) x6 (18)</code> ve <code>3. tur: (X, V) × 6 = 18</code> aynı sonucu verir. <code>R5-8: 24 sc</code> dört tur ekler.</p>
+        </details>
+      </section>
+
+      <section class="panel preview" aria-labelledby="preview-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="preview-heading">3B önizleme</h2>
+            <p>Modeli sürükleyerek döndür.</p>
+          </div>
+          <span id="preview-state" class="preview-state"></span>
+        </div>
+        <div class="stage">
+          <canvas id="model" tabindex="0" aria-label="Döndürülebilir örgü modeli. Ok tuşlarıyla döndür."></canvas>
+          <p id="empty-model" class="empty-model" hidden>İlk geçerli tur burada görünecek.</p>
+          <div class="view-controls" aria-label="Model görünümü">
+            <button type="button" id="zoom-out" title="Uzaklaştır" aria-label="Uzaklaştır">−</button>
+            <button type="button" id="zoom-in" title="Yakınlaştır" aria-label="Yakınlaştır">+</button>
+            <button type="button" id="reset-view" title="Görünümü sıfırla" aria-label="Görünümü sıfırla">↻</button>
+          </div>
+        </div>
+        <div class="preview-footer">
+          <div><strong id="round-count">0</strong><span>tur</span></div>
+          <div><strong id="stitch-count">0</strong><span>ilmek</span></div>
+          <label class="swatch" for="yarn-color"><span id="swatch-label">Tur seç</span><input id="yarn-color" type="color" value="#a48bd0" disabled></label>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel checks" aria-labelledby="check-heading">
+      <div class="panel-header">
+        <div>
+          <h2 id="check-heading">Tur kontrolü</h2>
+          <p id="check-status" aria-live="polite"></p>
+        </div>
+        <button type="button" class="button secondary" id="show-all" hidden>Tüm modeli göster</button>
+      </div>
+      <section id="tracking-panel" class="tracking-panel" hidden aria-label="Örgü takibi">
+        <div><strong id="progress-text"></strong><code id="current-command"></code></div>
+        <div class="tracking-actions">
+          <button type="button" id="previous-round" class="button secondary">Önceki</button>
+          <button type="button" id="next-round" class="button primary">Turu tamamla</button>
+        </div>
+      </section>
+      <ol id="round-list" class="round-list" aria-label="Tarif turları"></ol>
+    </section>
+
+    <dialog id="examples">
+      <form method="dialog">
+        <h2>Örnek tarif seç</h2>
+        <p>Örnek seçmek çalışma alanındaki taslağı değiştirir.</p>
+        <div id="example-list" class="example-list"></div>
+        <button class="button secondary" value="close">Vazgeç</button>
+      </form>
+    </dialog>
+  </main>
+</body>
+</html>
