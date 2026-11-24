@@ -66,7 +66,7 @@ function parseItems(text, depth = 0) {
   return items;
 }
 
-function parseStitch(part) {
+function parseStitch(part, allowSequence = true) {
   let text = normalize(part);
   let loop;
   text = text.replace(/(?:^\b(flo|blo)\b\s*|\s+\b(flo|blo)\b$)/g, (_, first, last) => {
@@ -93,6 +93,19 @@ function parseStitch(part) {
     }
   }
   const value = aliases.get(label);
+  if (!value && allowSequence) {
+    // A new explicit quantity can separate stitches without a comma. Keep
+    // multiword aliases and FLO/BLO prefixes attached to their stitch.
+    const commands = normalize(part).split(/(?<!\b(?:flo|blo))\s+(?=\d+\s*\p{L})/u);
+    if (commands.length > 1) {
+      const items = [];
+      for (const command of commands) {
+        items.push(...parseStitch(command, false));
+        if (items.length > MAX_STITCHES) throw new Error("Bu tur en fazla " + MAX_STITCHES + " işlem içerebilir.");
+      }
+      return items;
+    }
+  }
   if (!value) throw new Error("Bu yazımı tanıyamadım: " + part);
   return repeatItems([{ ...value, loop }], count);
 }
