@@ -21,6 +21,7 @@ stitch("sk", 1, 0, 0, ["skip", "atla"]);
 const MAX_ROUNDS = 150;
 const MAX_STITCHES = 400;
 const MAX_REPEAT = 400;
+const loopPrefix = /^(flo|blo)(?:\s+(?:r(?:nd|ound)?|tur)\s*(\d+))?\s*:\s*/i;
 
 function normalize(command) {
   return command.trim().toLocaleLowerCase("en").replace(/i\u0307/g, "i").replace(/\s+/g, " ");
@@ -123,7 +124,7 @@ function readLine(raw) {
     const trailing = command.match(/\s+(\d+)\s*(?:sts?|ilmek)?$/i);
     if (trailing) {
       const before = command.slice(0, trailing.index).trim();
-      const finalItem = before.split(",").at(-1).trim();
+      const finalItem = before.replace(loopPrefix, "").split(",").at(-1).trim();
       const alreadyQuantified = /[\d)\]]$/.test(finalItem) || /^\d+\s*[a-z]/i.test(finalItem);
       if (alreadyQuantified && !/[x×*]$/i.test(finalItem) && !/^\d+$/.test(finalItem)) {
         expected = Number(trailing[1]);
@@ -199,6 +200,7 @@ function readInstruction(command, expected, previous) {
 
 export function analyzePattern(source) {
   const rows = [];
+  const occupiedLoops = new Map();
   let round = 0;
   let previous = null;
   let stopped = false;
@@ -208,6 +210,8 @@ export function analyzePattern(source) {
     if (/^(?:fo|fasten off|bitir|close|kapat)[.!]?$/i.test(raw)) break;
     try {
       const { first, last, expected, command } = readLine(raw);
+      const prefix = command.match(loopPrefix);
+      const specifiedSource = prefix?.[2] === undefined ? null : Number(prefix[2]);
       const counts = command.match(/^(\d+)(?:\s*[x×*]\s*(\d+))?\s*(\?)?$/i);
       const start = first ?? round + 1;
       const repetitions = counts?.[2] ? Number(counts[2]) : 1;
@@ -217,7 +221,12 @@ export function analyzePattern(source) {
       if (counts?.[2] && last !== null && last !== start) {
         throw new Error("Tur aralığı veya tekrar sayısından birini yaz.");
       }
+      if (specifiedSource !== null && (specifiedSource < 1 || specifiedSource >= start || !rows[specifiedSource - 1]?.preview)) {
+        throw new Error("FLO/BLO için aynı parçadan daha önceki geçerli bir tur seç.");
+      }
       for (let number = start; number <= end; number++) {
+        const sourceRound = specifiedSource ?? (previous === null ? null : number - 1);
+        const available = specifiedSource === null ? previous : rows[specifiedSource - 1].made;
         let detail;
         if (counts) {
           const stitches = inferCountRound(Number(counts[1]), previous);
@@ -230,25 +239,42 @@ export function analyzePattern(source) {
               : "İlmek sayısından tahmin edildi."
           };
         } else {
-          const loopPrefix = command.match(/^(flo|blo)\s*:\s*/i);
-          detail = readInstruction(command.slice(loopPrefix?.[0].length ?? 0), expected, previous);
-          if (loopPrefix) {
-            const loop = loopPrefix[1].toLowerCase();
+          detail = readInstruction(command.slice(prefix?.[0].length ?? 0), expected, available);
+          if (prefix) {
+            const loop = prefix[1].toLowerCase();
             detail.stitches = detail.stitches.map((stitch) => ({ ...stitch, loop: stitch.loop ?? loop }));
-            detail.command = loopPrefix[0] + detail.command;
+            detail.command = prefix[0] + detail.command;
           }
         }
         const { used, made } = detail;
         if (made < 1 || made > MAX_STITCHES) throw new Error("Bir tur 1–" + MAX_STITCHES + " ilmek üretmeli.");
         let issue = "";
-        if (previous !== null && used !== previous) {
-          const difference = previous - used;
-          issue = "Önceki tur " + previous + " ilmek. Bu tur " + used + " ilmek kullanıyor. "
+        if (available !== null && used !== available) {
+          const difference = available - used;
+          const label = specifiedSource === null ? "Önceki tur" : "Kaynak tur R" + sourceRound;
+          issue = label + " " + available + " ilmek. Bu tur " + used + " ilmek kullanıyor. "
             + (difference > 0 ? difference + " ilmek boş kalıyor." : -difference + " ilmek eksik.");
         } else if (expected !== null && made !== expected) {
           issue = "Yazılan sayı " + expected + ", hesaplanan sayı " + made + ".";
         }
-        rows.push({ ...detail, index, number, issue, preview: !stopped && !issue });
+        if (!stopped && !issue && sourceRound !== null) {
+          const prior = occupiedLoops.get(sourceRound);
+          const occupied = prior?.slice() ?? new Uint8Array(available);
+          let cursor = 0;
+          for (const stitch of detail.stitches) {
+            const mask = stitch.made === 0 ? 0 : stitch.loop === "flo" ? 1 : stitch.loop === "blo" ? 2 : 3;
+            for (let i = 0; i < stitch.used; i++, cursor++) {
+              if (occupied[cursor] & mask) {
+                issue = "R" + sourceRound + " turunun " + (cursor + 1) + ". ilmeğinde bu halka zaten kullanılmış.";
+                break;
+              }
+              occupied[cursor] |= mask;
+            }
+            if (issue) break;
+          }
+          if (!issue) occupiedLoops.set(sourceRound, occupied);
+        }
+        rows.push({ ...detail, index, number, sourceRound, issue, preview: !stopped && !issue });
         stopped ||= Boolean(issue);
         previous = made;
         round = number;

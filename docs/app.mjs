@@ -1,5 +1,5 @@
-import { analyzeProject } from "./pattern.mjs";
-import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=bear-profile-1";
+import { analyzeProject } from "./pattern.mjs?v=shared-loops-1";
+import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs?v=shared-loops-1";
 
 const examples = [
   {

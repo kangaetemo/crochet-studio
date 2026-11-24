@@ -1,4 +1,5 @@
-import { createWebglRenderer } from "./renderer-gl.mjs?v=thread-1";
+import { createWebglRenderer } from "./renderer-gl.mjs?v=shared-loops-1";
+import { yarnInstances } from "./yarn.mjs?v=shared-loops-1";
 
 const TAU = Math.PI * 2;
 
@@ -51,14 +52,71 @@ export function defaultRoundColor(part, number, appearance = "plain") {
   return number >= 5 && number <= 7 ? "#bd7d9b" : "#a48bd0";
 }
 
+function roundProfile(rounds, widthScale) {
+  const childCounts = new Map();
+  for (const { sourceRound } of rounds) {
+    childCounts.set(sourceRound, (childCounts.get(sourceRound) ?? 0) + 1);
+  }
+  const byRound = new Map();
+  return rounds.map((row, index) => {
+    const parent = byRound.get(row.sourceRound);
+    const onSharedEdge = parent?.childCount > 1;
+    const worked = onSharedEdge ? row.stitches.filter((stitch) => stitch.used && stitch.made) : [];
+    const side = worked.every((stitch) => stitch.loop === worked[0]?.loop) ? worked[0]?.loop : undefined;
+    const separation = onSharedEdge ? Math.min(0.62, Math.max(0.24, parent.radius * 0.18)) : 0;
+    const radialOffset = (parent?.radialOffset ?? 0) + (side === "flo" ? separation : side === "blo" ? -separation : 0);
+    const entry = {
+      row, parent, radialOffset,
+      childCount: childCounts.get(row.number) ?? 0,
+      phaseIndex: (parent?.phaseIndex ?? -1) + 1,
+      height: (parent?.height ?? 0) + row.height * (side === "flo" ? 0.74 : 1),
+      radius: Math.max(0.32, Math.max(0.55, row.made / TAU) * widthScale + radialOffset)
+    };
+    if (parent) parent.childIndex ??= index;
+    byRound.set(row.number, entry);
+    return entry;
+  });
+}
+
+export function buildRings(part, appearance = "plain", widthScale = 1, hasFace = false) {
+  const rings = roundProfile(part.rows.filter((row) => row.preview), widthScale);
+  const height = rings.reduce((max, ring) => Math.max(max, ring.height), 0);
+  const radius = rings.reduce((max, ring) => Math.max(max, ring.radius), 0.55);
+  const last = rings.at(-1);
+  const closed = (ring) => !ring.childCount &&
+    (ring === last && hasFace || ring.row.made <= 6 && ring.radius < radius * 0.65);
+  // Ease the end caps of linear, stuffed pieces. A shared edge needs its own profile.
+  if (rings.length >= 5 && last.row.made <= 6 && last.radius < radius * 0.7 &&
+      rings.every((ring) => ring.childCount < 2)) {
+    const radii = rings.map((ring) => ring.radius);
+    const sample = (i) => radii[Math.max(0, Math.min(radii.length - 1, i))];
+    for (const [i, ring] of rings.entries()) {
+      if (i > 0 && i < rings.length - 1) {
+        ring.radius = (sample(i-2) + 3*sample(i-1) + 4*sample(i) + 3*sample(i+1) + sample(i+2)) / 12;
+      }
+      const t = ring.height / height;
+      ring.height = height * (0.32*t + 0.68*(1 - Math.cos(Math.PI*t))/2);
+    }
+  }
+  for (const ring of rings) {
+    const { row, parent, childIndex } = ring;
+    ring.stitches = row.stitches.flatMap((stitch) => Array.from({ length: stitch.made }, () => stitch));
+    ring.material = yarnMaterial(part.colors?.[row.number] ?? defaultRoundColor(part, row.number, appearance));
+    ring.bottomRadius = parent?.topRadius ?? 0;
+    ring.topRadius = ring.childCount === 1 ? (ring.radius + rings[childIndex].radius) / 2 : closed(ring) ? 0 : ring.radius;
+  }
+  return rings;
+}
+
 export function layoutParts(parts, appearance = "plain") {
   const winter = appearance === "winter";
   const dimensions = parts.map((part) => {
     const rounds = part.rows.filter((row) => row.preview);
     const kind = partKind(part.name);
-    const height = rounds.reduce((sum, row) => sum + row.height, 0);
-    const radius = rounds.reduce((max, row) => Math.max(max, row.made / TAU), 0.55);
     const widthScale = winter && kind === "ear" ? 1.14 : 1;
+    const profile = roundProfile(rounds, widthScale);
+    const height = profile.reduce((max, ring) => Math.max(max, ring.height), 0);
+    const radius = profile.reduce((max, ring) => Math.max(max, ring.radius), 0.55);
     let heightScale = winter && kind === "body" ? 0.82 : winter && kind === "hat" ? 0.88 : 1;
     const bearBody = (kind === "body" && winter)
       || ((kind === "body" || (parts.length === 1 && part.id === "default")) && hasBobblePairs(rounds));
@@ -72,7 +130,7 @@ export function layoutParts(parts, appearance = "plain") {
     return {
       id: part.id, kind, heightScale, widthScale,
       height: height * heightScale,
-      radius: radius * widthScale
+      radius
     };
   });
   const living = dimensions.filter((part) => part.height > 0);
@@ -148,30 +206,7 @@ export function createScene(canvas, onPick) {
       const old = previous.get(part.id);
       let rings = old?.rings;
       if (old?.source !== part.rows || old.colors !== part.colors || old.appearance !== appearance) {
-        let height = 0;
-        rings = part.rows.filter((row) => row.preview).map((row) => {
-          height += row.height;
-          const stitches = row.stitches.flatMap((stitch) => Array.from({ length: stitch.made }, () => stitch));
-          return {
-            row, height, stitches,
-            radius: Math.max(0.55, stitches.length / TAU) * base.widthScale,
-            material: yarnMaterial(part.colors?.[row.number] ?? defaultRoundColor(part, row.number, appearance))
-          };
-        });
-        // Stuffed, closed pieces ease between round widths; open cuffs retain their rim.
-        if (rings.length >= 5 && rings.at(-1).stitches.length <= 6 && rings.at(-1).radius < Math.max(...rings.map(r => r.radius))*0.7) {
-          const radii = rings.map(r => r.radius);
-          for (let i=1; i<rings.length-1; i++) {
-            const sample = j => radii[Math.max(0, Math.min(radii.length-1, j))];
-            rings[i].radius = (sample(i-2) + 3*sample(i-1) + 4*sample(i) + 3*sample(i+1) + sample(i+2))/12;
-          }
-          // At a closed pole some of each round's yarn runs outward instead of up.
-          // Ease the end caps into the side wall while preserving total piece height.
-          for (const ring of rings) {
-            const t = ring.height / height;
-            ring.height = height * (0.32*t + 0.68*(1 - Math.cos(Math.PI*t))/2);
-          }
-        }
+        rings = buildRings(part, appearance, base.widthScale, hasFace);
       }
       const position = {
         x: base.x + (part.offset?.x ?? 0),
@@ -180,11 +215,17 @@ export function createScene(canvas, onPick) {
         tilt: base.tilt,
         flipped: base.flipped !== Boolean(part.offset?.reverse)
       };
-      return {
-        id: part.id, rings, stitchColors: part.stitchColors, height: rings.at(-1)?.height ?? 0, position, winter, hasFace,
+      const model = {
+        id: part.id, rings, stitchColors: part.stitchColors, position, winter, hasFace,
+        height: rings.reduce((max, ring) => Math.max(max, ring.height), 0),
         source: part.rows, colors: part.colors, appearance, heightScale: base.heightScale,
         radius: rings.reduce((max, ring) => Math.max(max, ring.radius), 0.55)
       };
+      if (!gpu) {
+        model.yarn = old?.rings === rings && old.position.flipped === position.flipped
+          ? old.yarn : yarnInstances(model).data;
+      }
+      return model;
     }).filter((model) => model.rings.length);
     gpu?.update(models, selection);
     schedule();
@@ -280,39 +321,30 @@ export function createScene(canvas, onPick) {
         );
       }
 
-      const phaseStep = model.hasFace ? 0.02 : 0.085;
-      let phase = 0;
-      if (model.hasFace) {
-        const pairIndex = rings.findIndex((ring) => ring.stitches.filter((stitch) => stitch.name === "bobble").length === 2);
-        if (pairIndex >= 0) {
-          const ring = rings[pairIndex];
-          const angles = ring.stitches.flatMap((stitch, index) => stitch.name === "bobble" ? [index * TAU / ring.stitches.length] : []);
-          const midpoint = Math.atan2(Math.sin(angles[0]) + Math.sin(angles[1]), Math.cos(angles[0]) + Math.cos(angles[1]));
-          phase = flip * Math.PI / 2 - midpoint - phaseStep * pairIndex;
-        }
-      }
-
-      for (const [index, ring] of rings.entries()) {
-        const step = TAU / ring.stitches.length;
-        const previousRing = rings[index - 1];
-        const bottomRadius = (ring.radius + (previousRing?.radius ?? ring.radius * 0.5)) * 0.5;
-        const topRadius = (ring.radius + (rings[index + 1]?.radius ?? ring.radius * 0.66)) * 0.5;
-        const top = ring.height;
-        const roundHeight = top - (previousRing?.height ?? 0);
-        const bottom = top - roundHeight * 0.89;
+      let firstInstance = 0;
+      for (const ring of rings) {
+        const bottom = ring.parent?.height ?? 0;
+        const roundHeight = ring.height - bottom;
         for (let stitchIndex = 0; stitchIndex < ring.stitches.length; stitchIndex += firstStep) {
           const stitch = ring.stitches[stitchIndex];
-          const angle = step * stitchIndex + index * phaseStep + phase;
+          const offset = (firstInstance + stitchIndex) * 12;
+          const angle = model.yarn[offset];
+          const parentAngle = angle + model.yarn[offset + 1];
+          const loopDepth = model.yarn[offset + 10];
+          const bottomRadius = model.yarn[offset + 2] + loopDepth;
+          const topRadius = model.yarn[offset + 3];
+          const step = model.yarn[offset + 6];
           const bump = stitch.name === "bobble";
-          const loopDepth = stitch.loop === "flo" ? 0.11 : stitch.loop === "blo" ? -0.09 : 0;
-          const lip = loopDepth + (bump && model.winter ? 0.53 : 0);
-          const center = projectStitch(angle, (top + bottom) * 0.5, ring.radius + lip);
+          const lip = bump && model.winter ? 0.53 : 0;
+          const middleAngle = (angle + parentAngle) * 0.5;
+          const middleRadius = (bottomRadius + topRadius) * 0.5 + lip;
+          const center = projectStitch(middleAngle, bottom + roundHeight * 0.5, middleRadius);
           const v = [
-            projectStitch(angle - step * 0.42, top, topRadius + lip),
-            projectStitch(angle - step * 0.20, bottom + roundHeight * 0.2, bottomRadius + lip),
-            projectStitch(angle, bottom, bottomRadius + lip),
-            projectStitch(angle + step * 0.2, bottom + roundHeight * 0.2, bottomRadius + lip),
-            projectStitch(angle + step * 0.42, top, topRadius + lip)
+            projectStitch(angle - step * 0.42, ring.height, topRadius),
+            projectStitch(middleAngle - step * 0.20, bottom + roundHeight * 0.3, middleRadius),
+            projectStitch(parentAngle, bottom, bottomRadius),
+            projectStitch(middleAngle + step * 0.20, bottom + roundHeight * 0.3, middleRadius),
+            projectStitch(angle + step * 0.42, ring.height, topRadius)
           ];
           const shadeAngle = flip * angle + view.yaw;
           const light = 0.87 + 0.16 * Math.sin(shadeAngle) - 0.08 * Math.cos(shadeAngle);
@@ -320,13 +352,15 @@ export function createScene(canvas, onPick) {
           const color = model.stitchColors?.[ring.row.number]?.[stitchIndex+1];
           marks.push({ v, center, light, material: color ? yarnMaterial(color) : ring.material, faded, bump, winter: model.winter });
         }
+        firstInstance += ring.stitches.length;
       }
 
       if (model.hasFace && rings.length >= 6) {
         const front = flip * Math.PI / 2;
         const facePoint = (offset, proportion) => {
           const elevation = model.height * (0.5 + proportion * flip);
-          const ring = rings.find((candidate) => candidate.height >= elevation) ?? rings.at(-1);
+          const ring = rings.find((candidate) => candidate.height >= elevation && (candidate.parent?.height ?? 0) <= elevation)
+            ?? rings.at(-1);
           return projectStitch(front + offset * flip, elevation, ring.radius + 0.2);
         };
         for (const offset of [-0.36, 0.36]) {
