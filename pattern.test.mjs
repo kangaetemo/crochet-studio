@@ -57,6 +57,23 @@ test("accepts comma-free quantities while preserving multiword stitches and loop
   }
 });
 
+test("applies FLO to every stitch of the screenshot's fifth round", () => {
+  const [part] = analyzeProject("mr: 9 sc\n9 inc\n(1 sc 1 inc 1 sc) x6\n(3 sc 1 inc) x6\nFLO: (2 sc 1 inc 2 sc) x6");
+  assert.deepEqual(part.rows.map(({ made }) => made), [9, 18, 24, 30, 36]);
+  assert.ok(part.rows.every(({ preview }) => preview));
+  const fifth = part.rows[4];
+  assert.equal(fifth.used, 30);
+  assert.equal(fifth.stitches.length, 30);
+  assert.ok(fifth.stitches.every(({ loop }) => loop === "flo"));
+});
+
+test("applies BLO across the round and preserves individual loop instructions", () => {
+  const rows = analyzePattern("6 sc\nR2: BLO: 2 sc, (FLO sc, inc) x2 = 8");
+  assert.equal(rows[1].issue, "");
+  assert.equal(rows[1].made, 8);
+  assert.deepEqual(rows[1].stitches.map(({ loop }) => loop), ["blo", "blo", "flo", "blo", "flo", "blo"]);
+});
+
 test("comma-free sequences still reject unknown commands and excessive work", () => {
   for (const input of ["1 sc 1 xyz 1 inc", "(1 sc 1 xyz) x6"]) {
     assert.match(analyzePattern(input)[0].issue, /tanıyamadım.*xyz/);
