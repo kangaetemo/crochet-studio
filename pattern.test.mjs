@@ -32,6 +32,40 @@ test("reports a mismatch without generating later rounds in the model", () => {
   assert.deepEqual(rows.map(({ preview }) => preview), [true, false, false]);
 });
 
+test("accepts the screenshot's comma-free repeat with the same stitch order", () => {
+  const prefix = "R1: SH: 9 sc\n9 inc\n";
+  for (const group of ["(1 sc 1 inc 1 sc) x6", "[1sc 1inc 1sc] ×6", "6*(1 sc 1 inc 1 sc)"]) {
+    const rows = analyzePattern(prefix + group);
+    assert.ok(rows.every(row => row.preview), group);
+    assert.deepEqual(rows.map(row => row.made), [9, 18, 24]);
+    assert.equal(rows[2].used, 18);
+    assert.deepEqual(rows[2].stitches, analyzePattern(prefix + "(1 sc, 1 inc, 1 sc) x6")[2].stitches);
+  }
+});
+
+test("accepts comma-free quantities while preserving multiword stitches and loops", () => {
+  for (const [input, separated] of [
+    ["1 sc 1 inc 1 sc", "1 sc, 1 inc, 1 sc"],
+    ["1 hdc inc 1 hdc dec 1 sık iğne", "1 hdc inc, 1 hdc dec, 1 sık iğne"],
+    ["FLO 1 sc 1 inc 1 sc BLO", "FLO 1 sc, 1 inc, 1 sc BLO"],
+    ["2 sc in next st 1 sc", "2 sc in next st, 1 sc"],
+    ["[(1 sc 1 inc) x2] x3", "[(1 sc, 1 inc) x2] x3"]
+  ]) {
+    const row = analyzePattern(input)[0];
+    assert.equal(row.issue, "", input);
+    assert.deepEqual(row.stitches, analyzePattern(separated)[0].stitches, input);
+  }
+});
+
+test("comma-free sequences still reject unknown commands and excessive work", () => {
+  for (const input of ["1 sc 1 xyz 1 inc", "(1 sc 1 xyz) x6"]) {
+    assert.match(analyzePattern(input)[0].issue, /tanıyamadım.*xyz/);
+  }
+  for (const input of ["400 sc 1 sc", "(1 sc 1 inc 1 sc) x400"]) {
+    assert.match(analyzePattern(input)[0].issue, /en fazla/);
+  }
+});
+
 test("validates declared stitch counts and unknown instructions", () => {
   const rows = analyzePattern("R1: 6 sc\nR2: inc x6 (11)\nR3: xyz, 12 sc");
   assert.match(rows[1].issue, /hesaplanan sayı 12/);
