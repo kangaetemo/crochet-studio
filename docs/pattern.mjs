@@ -230,7 +230,13 @@ export function analyzePattern(source) {
               : "İlmek sayısından tahmin edildi."
           };
         } else {
-          detail = readInstruction(command, expected, previous);
+          const loopPrefix = command.match(/^(flo|blo)\s*:\s*/i);
+          detail = readInstruction(command.slice(loopPrefix?.[0].length ?? 0), expected, previous);
+          if (loopPrefix) {
+            const loop = loopPrefix[1].toLowerCase();
+            detail.stitches = detail.stitches.map((stitch) => ({ ...stitch, loop: stitch.loop ?? loop }));
+            detail.command = loopPrefix[0] + detail.command;
+          }
         }
         const { used, made } = detail;
         if (made < 1 || made > MAX_STITCHES) throw new Error("Bir tur 1–" + MAX_STITCHES + " ilmek üretmeli.");
