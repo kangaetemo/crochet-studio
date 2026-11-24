@@ -182,6 +182,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, canvas:focus-
 .round-row:hover, .round-row[aria-pressed="true"] { background: #f2ebf6; }
 .round-row.has-error { color: var(--warning); }
 .round-command { overflow-wrap: anywhere; font-family: ui-monospace, Consolas, monospace; }
+.round-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--quiet);
+  font: 0.75rem/1.4 "Segoe UI", system-ui, sans-serif;
+}
 .number { font-variant-numeric: tabular-nums; text-align: right; }
 .tracking-panel {
   display: flex;

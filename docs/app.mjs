@@ -76,6 +76,12 @@ function renderList() {
     const command = document.createElement("span");
     command.className = "round-command";
     command.textContent = row.issue || row.command;
+    if (row.note) {
+      const note = document.createElement("small");
+      note.className = "round-note";
+      note.textContent = row.note;
+      command.append(note);
+    }
     const count = document.createElement("span");
     count.className = "number";
     count.textContent = row.made == null ? "—" : row.made + " ilmek";
