@@ -57,11 +57,11 @@ export function yarnTemplate(steps = 32, sides = 6) {
 export function roundPhase(model) {
   const step = model.hasFace ? 0.02 : 0.085;
   if (model.hasFace) {
-    for (const [i, ring] of model.rings.entries()) {
+    for (const ring of model.rings) {
       const angles = ring.stitches.flatMap((s, j) => s.name === "bobble" ? [TAU*j/ring.stitches.length] : []);
       if (angles.length === 2) {
         const [a,b] = angles;
-        return { step, start: (model.position.flipped ? -1 : 1)*Math.PI/2 - Math.atan2(Math.sin(a)+Math.sin(b),Math.cos(a)+Math.cos(b)) - i*step };
+        return { step, start: (model.position.flipped ? -1 : 1)*Math.PI/2 - Math.atan2(Math.sin(a)+Math.sin(b),Math.cos(a)+Math.cos(b)) - ring.phaseIndex*step };
       }
     }
   }
@@ -76,19 +76,20 @@ export function yarnInstances(model) {
   const count = rings.reduce((sum, r) => sum + r.stitches.length, 0);
   const data = new Float32Array(count * 12);
   let instance = 0;
-  for (const [i, ring] of rings.entries()) {
-    const prev = rings[i-1], next = rings[i+1];
-    const lastClosed = ring.stitches.length <= 6 && ring.radius < model.radius * 0.65;
-    const bottomR = prev ? (prev.radius + ring.radius)/2 : ring.radius*0.18;
-    const topR = next ? (next.radius + ring.radius)/2 : lastClosed ? ring.radius*0.28 : ring.radius;
-    const y = ((prev?.height ?? 0) - model.height/2) * model.heightScale;
-    const height = (ring.height - (prev?.height ?? 0)) * model.heightScale;
+  for (const ring of rings) {
+    const parent = ring.parent;
+    const bottomR = parent ? ring.bottomRadius : ring.radius * 0.18;
+    const topR = ring.topRadius || ring.radius * 0.28;
+    const y = ((parent?.height ?? 0) - model.height/2) * model.heightScale;
+    const height = (ring.height - (parent?.height ?? 0)) * model.heightScale;
     let used = 0, made = 0;
     for (const stitch of ring.row.stitches) {
       for (let j = 0; j < stitch.made; j++) {
-        const top = start + i*step + TAU*made/ring.stitches.length;
-        const parent = prev && stitch.used ? start + (i-1)*step + TAU*(used + (stitch.used-1)/2)/prev.stitches.length : top;
-        const delta = Math.atan2(Math.sin(parent-top), Math.cos(parent-top));
+        const top = start + ring.phaseIndex*step + TAU*made/ring.stitches.length;
+        const baseAngle = parent && stitch.used
+          ? start + parent.phaseIndex*step + TAU*(used + (stitch.used-1)/2)/parent.stitches.length
+          : top;
+        const delta = Math.atan2(Math.sin(baseAngle-top), Math.cos(baseAngle-top));
         const spread = stitch.used > 1 ? 1.46 : 1;
         const lift = stitch.name === "bobble" ? 0.56 : 0;
         const loop = stitch.loop === "flo" ? 0.12 : stitch.loop === "blo" ? -0.08 : 0;

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzePattern, analyzeProject } from "./docs/pattern.mjs";
-import { layoutParts, defaultRoundColor, resolveAppearance } from "./docs/scene.mjs";
+import { buildRings, layoutParts, defaultRoundColor, resolveAppearance } from "./docs/scene.mjs";
 import { buildSurface } from "./docs/renderer-gl.mjs";
 import { yarnInstances, yarnTemplate } from "./docs/yarn.mjs";
 
@@ -72,6 +72,36 @@ test("applies BLO across the round and preserves individual loop instructions", 
   assert.equal(rows[1].issue, "");
   assert.equal(rows[1].made, 8);
   assert.deepEqual(rows[1].stitches.map(({ loop }) => loop), ["blo", "blo", "flo", "blo", "flo", "blo"]);
+});
+
+const sharedLoops = [
+  "6 sc", "6 inc", "(sc, inc) x6", "(2 sc, inc) x6", "(3 sc, inc) x6",
+  "FLO: (2 sc 1 inc 2 sc) x6", "BLO R5: 30 sc (30)", "30 sc"
+].join("\n");
+
+test("works both sides of a source round, even when the first branch increases", () => {
+  const rows = analyzePattern(sharedLoops);
+  assert.ok(rows.every((row) => row.preview), rows.map((row) => row.issue).filter(Boolean).join(", "));
+  assert.deepEqual(rows.slice(-3).map(({ sourceRound, used, made }) => [sourceRound, used, made]), [
+    [5, 30, 36], [5, 30, 30], [7, 30, 30]
+  ]);
+  const reverse = analyzePattern("6 sc\nR2: BLO: 6 inc\nR3: FLO R1: 6 sc 6\n6 sc");
+  assert.ok(reverse.every((row) => row.preview));
+  assert.deepEqual(reverse.map(({ sourceRound }) => sourceRound), [null, 1, 1, 3]);
+  const sequential = analyzePattern("6 sc\nFLO: 6 inc\nBLO: 12 sc");
+  assert.deepEqual(sequential.map(({ sourceRound, preview }) => [sourceRound, preview]), [[null, true], [1, true], [2, true]]);
+});
+
+test("validates a branch against its source and rejects reusing a consumed loop", () => {
+  const base = "6 sc\nFLO: 6 inc\n";
+  assert.match(analyzePattern(base + "BLO R1: 12 sc")[2].issue, /Kaynak tur R1 6 ilmek/);
+  assert.match(analyzePattern(base + "FLO R1: 6 sc")[2].issue, /halka zaten kullanılmış/);
+  assert.match(analyzePattern(base + "BLO R3: 6 sc")[2].issue, /daha önceki geçerli bir tur/);
+  const [firstPart, secondPart] = analyzeProject("### Gövde\n" + base + "### Şapka\nBLO R1: 6 sc");
+  assert.ok(firstPart.rows.every(({ preview }) => preview));
+  assert.match(secondPart.rows[0].issue, /aynı parçadan/);
+  const skipped = analyzePattern("4 sc\nFLO: sc, sk, 2 sc\nFLO R1: sk, sc, 2 sk");
+  assert.ok(skipped.every(({ preview }) => preview));
 });
 
 test("comma-free sequences still reject unknown commands and excessive work", () => {
@@ -212,10 +242,7 @@ test("keeps the pasted polar bear wider than it is tall in both previews", () =>
 
 test("builds bounded, closed surface geometry from valid rounds", () => {
   const rounds = analyzePattern("R1: 6 sc\nR2: 6 inc\nR3: 12 sc\nR4: 6 dec");
-  const rings = rounds.map((row, i) => ({
-    row, stitches: row.stitches.flatMap((stitch) => Array(stitch.made).fill(stitch)),
-    radius: row.made / (2 * Math.PI), height: i + 1, material: [210, 175, 190]
-  }));
+  const rings = buildRings({ name: "Ana parça", rows: rounds });
   const geometry = buildSurface({ rings, height: 4, heightScale: 1, radius: rings[1].radius, hasFace: false });
   const numberOfVertices = geometry.vertices.length / 12;
   assert.ok(numberOfVertices <= rings.length * 97 * 3);
@@ -238,8 +265,7 @@ test("two-ply mesh is reusable and contains only finite, indexed geometry", () =
 test("increases share their parent and skips advance the following stitch's base", () => {
   const rows = analyzePattern("4 sc\ninc, sk, 2 sc\ndec, 2 sc");
   assert.ok(rows.every(r => r.preview));
-  const rings = rows.map((row,i) => ({ row, height:i+1, radius:row.made/(2*Math.PI),
-    stitches:row.stitches.flatMap(s => Array(s.made).fill(s)) }));
+  const rings = buildRings({ name: "Ana parça", rows });
   const {data,count} = yarnInstances({rings,height:3,heightScale:1,radius:1});
   assert.equal(count,11);
   assert.ok(data.every(Number.isFinite));
@@ -247,5 +273,37 @@ test("increases share their parent and skips advance the following stitch's base
   assert.ok(Math.abs(parentAngle(4)-parentAngle(5)) < 1e-6);
   assert.ok(Math.abs(parentAngle(6)-Math.PI) < 1e-6);
   assert.ok(Math.abs(parentAngle(8)-(0.085+Math.PI/4)) < 1e-6);
+});
+
+test("surface and yarn join both branches to the same edge in 3D", () => {
+  const [part] = analyzeProject(sharedLoops);
+  const rings = buildRings(part);
+  const [source, front, back, following] = rings.slice(-4);
+  assert.equal(front.parent, source);
+  assert.equal(back.parent, source);
+  assert.equal(following.parent, back);
+  assert.equal(front.bottomRadius, back.bottomRadius);
+  assert.ok(front.radius > back.radius);
+  assert.ok(front.height < following.height);
+  const model = { rings, height: following.height, heightScale: 1, radius: front.radius };
+  const { data } = yarnInstances(model);
+  const firstInstance = (ring) => 12 * rings.slice(0, rings.indexOf(ring))
+    .reduce((sum, previous) => sum + previous.stitches.length, 0);
+  const frontOffset = firstInstance(front);
+  const backOffset = firstInstance(back);
+  const baseAngle = (offset) => data[offset] + data[offset + 1];
+  assert.ok(Math.abs(baseAngle(frontOffset) - baseAngle(backOffset)) < 1e-6);
+  assert.equal(data[frontOffset + 4], data[backOffset + 4]);
+  assert.ok(data[frontOffset + 10] > 0 && data[backOffset + 10] < 0);
+  assert.ok(data[firstInstance(following) + 4] > data[backOffset + 4]);
+
+  const { vertices } = buildSurface(model);
+  const firstElevationByRound = new Map();
+  for (let i = 0; i < vertices.length; i += 12) {
+    const round = vertices[i + 11];
+    if (!firstElevationByRound.has(round)) firstElevationByRound.set(round, vertices[i + 1]);
+  }
+  assert.equal(firstElevationByRound.get(6), firstElevationByRound.get(7));
+  assert.ok(firstElevationByRound.get(8) > firstElevationByRound.get(7));
 });
 

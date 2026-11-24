@@ -1,4 +1,4 @@
-import { roundPhase, yarnInstances, yarnTemplate } from "./yarn.mjs?v=thread-1";
+import { roundPhase, yarnInstances, yarnTemplate } from "./yarn.mjs?v=shared-loops-1";
 
 const TAU = Math.PI * 2;
 const STRIDE = 12;
@@ -39,7 +39,8 @@ function addFace(model, vertices, indices) {
   const flip = model.position.flipped ? -1 : 1;
   const centerAt = (angle, yFraction, lift) => {
     const elevation = model.height * (0.5 + yFraction * flip);
-    const ring = model.rings.find((entry) => entry.height >= elevation) ?? model.rings.at(-1);
+    const ring = model.rings.find((entry) => entry.height >= elevation && (entry.parent?.height ?? 0) <= elevation)
+      ?? model.rings.at(-1);
     const radius = ring.radius + lift;
     return [Math.sin(angle) * radius, (elevation - model.height / 2) * model.heightScale, flip * Math.cos(angle) * radius];
   };
@@ -62,17 +63,13 @@ export function buildSurface(model) {
 
   const segments = Math.max(24, Math.min(96, Math.ceil(model.radius * TAU * 2)));
   const columns = segments + 1;
-  const last = rings.at(-1);
-  const closes = model.hasFace || (last.stitches.length <= 6 && last.radius < model.radius * 0.65);
   const localY = elevation => (elevation - model.height / 2) * model.heightScale;
   const { step: phaseStep, start: phase } = roundPhase(model);
 
-  for (const [index, ring] of rings.entries()) {
-    const previous = rings[index - 1];
-    const next = rings[index + 1];
-    const bottom = previous ? (previous.radius + ring.radius) / 2 : 0;
-    const top = next ? (next.radius + ring.radius) / 2 : closes ? 0 : ring.radius;
-    const bottomY = localY(previous?.height ?? 0);
+  for (const ring of rings) {
+    const bottom = ring.bottomRadius;
+    const top = ring.topRadius;
+    const bottomY = localY(ring.parent?.height ?? 0);
     const topY = localY(ring.height);
     const tall = Math.max(topY - bottomY, 0.017);
     const start = vertices.length / STRIDE;
@@ -84,13 +81,14 @@ export function buildSurface(model) {
       const slope = (band === 0 ? (ring.radius - bottom) * 2 : band === 2 ? (top - ring.radius) * 2 : top - bottom) / tall;
       for (let column = 0; column <= segments; column++) {
         const angle = TAU * column / segments;
-        const tile = (column / segments - (phase + index * phaseStep) / TAU) * count;
+        const tile = (column / segments - (phase + ring.phaseIndex * phaseStep) / TAU) * count;
         const stalk = ((Math.round(tile) % count) + count) % count;
         const stitch = ring.stitches[stalk];
         const envelope = 1 - Math.abs(tile - Math.round(tile)) * 2;
         const puff = band === 1 && stitch.name === "bobble" ? envelope * 0.60 : 0;
-        const loop = band === 1 ? stitch.loop === "flo" ? 0.11 : stitch.loop === "blo" ? -0.08 : 0 : 0;
-        vertices.push(...yarnPoint(angle, y, radius + puff + loop, slope, ring.material, tile + 0.5, t, ring.row.number));
+        const loop = stitch.loop === "flo" ? 0.11 : stitch.loop === "blo" ? -0.08 : 0;
+        const loopOffset = band < 2 && ring.parent ? (1 - t) * loop : 0;
+        vertices.push(...yarnPoint(angle, y, radius + puff + loopOffset, slope, ring.material, tile + 0.5, t, ring.row.number));
       }
     }
     for (let row = 0; row < 2; row++) {
@@ -146,11 +144,11 @@ void main() {
       a_position.x * a_row.z * mix(a_row.w, 1.0, t);
     float bulge = sin(clamp(t,0.0,1.0)*3.141593);
     float radius = mix(a_angles.z,a_angles.w,t) + 0.10 + a_position.z +
-      a_detail.y*bulge + a_detail.z;
+      a_detail.y*bulge + a_detail.z*(1.0-clamp(t,0.0,1.0));
     vec3 radial = vec3(cos(angle),0.0,sin(angle));
     vec3 tangent = vec3(-radial.z,0.0,radial.x);
     position = radial*radius;
-    position.y = a_row.x + a_row.y * (1.0 + (t-1.0)*a_detail.w);
+    position.y = a_row.x + a_row.y * (t + bulge*(a_detail.w-1.0)*0.30);
     normal = normalize(tangent*a_normal.x + vec3(0.0,a_normal.y,0.0) + radial*a_normal.z);
     roundNumber = a_detail.x;
     v_id = u_firstId + gl_InstanceID;
