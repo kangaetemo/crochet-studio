@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { analyzePattern, analyzeProject } from "./docs/pattern.mjs";
-import { layoutParts, defaultRoundColor } from "./docs/scene.mjs";
+import { layoutParts, defaultRoundColor, resolveAppearance } from "./docs/scene.mjs";
 
 test("parses each requested stitch, including both explicit reductions", () => {
   const cases = [
@@ -106,4 +106,25 @@ test("places duplicate ears on opposite sides and flips the hat over the body", 
   assert.ok(hat.y > body.y);
   assert.equal(hat.flipped, true);
   assert.notEqual(defaultRoundColor(parts[0], 1), defaultRoundColor(parts[3], 1));
+});
+
+test("recognizes the winter assembly and places its details without changing counts", () => {
+  const parts = analyzeProject([
+    "### Gövde", "6 sc", "6 inc", "5 sc, bob, 5 sc, bob", "12 sc", "5 sc, bob, 5 sc, bob",
+    "### Kulak", "4 hdc", "### Kulak", "4 hdc",
+    "### Şapka", "4 sc", "4 inc", "4 dec", "4 inc", "8 sc"
+  ].join("\n"));
+  assert.equal(resolveAppearance(parts), "winter");
+  assert.equal(resolveAppearance(parts, "plain"), "plain");
+  assert.equal(resolveAppearance(parts.filter((part) => part.name !== "Kulak 2")), "plain");
+  const plain = layoutParts(parts);
+  const winter = layoutParts(parts, "winter");
+  const [body, ear, otherEar, hat] = parts;
+  assert.ok(winter.get(body.id).heightScale < plain.get(body.id).heightScale);
+  assert.equal(winter.get(body.id).flipped, true);
+  assert.ok(winter.get(ear.id).x < 0 && winter.get(otherEar.id).x > 0);
+  assert.ok(winter.get(hat.id).y < plain.get(hat.id).y);
+  assert.equal(defaultRoundColor(hat, 3, "winter"), "#f6eee0");
+  assert.notEqual(defaultRoundColor(hat, 3, "winter"), defaultRoundColor(hat, 4, "winter"));
+  assert.deepEqual(hat.rows.map((row) => row.made), [4, 8, 4, 8, 8]);
 });

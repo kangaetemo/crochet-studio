@@ -19,4 +19,4 @@ docs/ klasörünü herhangi bir statik web sunucusuyla sun. Paket kurulumu ve de
 
 `node --test pattern.test.mjs`
 
-3B önizleme şu anda tur bazlı, yaklaşık bir şekil gösterir. Gövde, kulak ve şapka başlıkları için başlangıç konumları hesaplanır. Parça yerleşimi ve renkleri tarayıcıya kaydedilir.
+3B önizleme şu anda tur bazlı, yaklaşık bir şekil gösterir. Gövde, kulak ve şapka başlıkları için başlangıç konumları hesaplanır. Parça yerleşimi ve renkleri tarayıcıya kaydedilir. Kışlık ayıcık görünümü, uyumlu şapkalı tariflere yaklaşık gövde oranları, renkler ve yüz detayları ekler.

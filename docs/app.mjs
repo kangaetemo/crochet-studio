@@ -1,5 +1,5 @@
 import { analyzeProject } from "./pattern.mjs";
-import { createScene, defaultRoundColor } from "./scene.mjs";
+import { createScene, defaultRoundColor, resolveAppearance } from "./scene.mjs";
 
 const examples = [
   {
@@ -35,6 +35,18 @@ const examples = [
       "### Sağ kulak", "R1: 4 hdc", "R2: (hdc, hdc inc) x2", "",
       "### Şapka", "R1: 6 sc in ring", "R2: 6 inc", "R3: 12 hdc", "R4: (sc, inc) x6", "R5: 18 hdc"
     ].join("\n")
+  },
+  {
+    title: "Kışlık Ayıcık",
+    pattern: [
+      "### Gövde", "6 sc", "6 inc", "(sc, inc) x6", "(2 sc, inc) x6", "(3 sc, inc) x6",
+      "(4 sc, inc) x6", "36 sc", "11 sc, bob, 11 sc, bob, 12 sc", "R9-11: 36 sc",
+      "11 sc, bob, 11 sc, bob, 12 sc", "(4 sc, dec) x6", "(3 sc, dec) x6",
+      "(2 sc, dec) x6", "(sc, dec) x6", "6 dec", "FO", "",
+      "### Sol kulak", "5 hdc", "(hdc, hdc inc) x2, hdc", "",
+      "### Sağ kulak", "5 hdc", "(hdc, hdc inc) x2, hdc", "",
+      "### Şapka", "5 sc", "5 inc", "5 dec", "5 inc", "(sc, inc) x5", "(2 sc, inc) x5", "(3 sc, inc) x5", "25 sc"
+    ].join("\n")
   }
 ];
 
@@ -44,6 +56,7 @@ const pattern = id("pattern");
 const list = id("round-list");
 const yarnColor = id("yarn-color");
 const picker = id("part-select");
+const appearancePicker = id("preview-appearance");
 const placement = id("part-placement");
 const reverse = id("part-reverse");
 const axes = ["x", "y", "z"];
@@ -138,14 +151,18 @@ function renderSelection() {
   const active = valid.find((row) => row.number === selected);
   const configured = settings();
   const part = parts.find(({ id }) => id === activePart);
+  const appearance = resolveAppearance(parts, draft.appearance);
+  appearancePicker.value = draft.appearance ?? "auto";
+  appearancePicker.options[0].textContent = appearance === "winter" && appearancePicker.value === "auto"
+    ? "Otomatik · kışlık ayıcık" : "Otomatik";
   scene.update(parts.map((piece) => {
     const saved = settings(piece.id);
     return { ...piece, colors: saved.colors, offset: saved.offset };
-  }), { part: activePart, round: selected });
+  }), { part: activePart, round: selected }, appearance);
   id("show-all").hidden = !selected;
   yarnColor.disabled = !active;
   id("swatch-label").textContent = active ? active.number + ". turun rengi" : "Renk için tur seç";
-  if (active) yarnColor.value = configured.colors?.[active.number] ?? defaultRoundColor(part, active.number);
+  if (active) yarnColor.value = configured.colors?.[active.number] ?? defaultRoundColor(part, active.number, appearance);
   if (parts.length > 1) {
     for (const axis of axes) id("part-" + axis).value = configured.offset?.[axis] ?? 0;
     reverse.checked = Boolean(configured.offset?.reverse);
@@ -231,6 +248,11 @@ list.addEventListener("click", (event) => {
   if (!button) return;
   selected = Number(button.dataset.round);
   renderSelection();
+});
+appearancePicker.addEventListener("change", () => {
+  draft.appearance = appearancePicker.value;
+  renderSelection();
+  save();
 });
 picker.addEventListener("change", () => {
   activePart = picker.value;
