@@ -243,3 +243,49 @@ export function analyzePattern(source) {
   }
   return rows;
 }
+
+function normalizeProjectLine(line) {
+  const markdown = line.match(/^\s*(?:\d+\.\s*)?\*\*(?:(?:round|tur)\s+(\d+(?:\s*[-–]\s*\d+)?)|(finishing|bitiriş))\*\*\s*:?\s*(.*)$/i);
+  if (markdown) return markdown[1] ? "R" + markdown[1] + ": " + markdown[3] : markdown[3];
+  const copiedRound = line.match(/^\s*(?:\d+\.\s*)?(?:round|tur)\s+(\d+(?:\s*[-–]\s*\d+)?)\s+([^:\s].*)$/i);
+  if (copiedRound) return "R" + copiedRound[1] + ": " + copiedRound[2];
+  const finishing = line.match(/^\s*(?:\d+\.\s*)?(?:finishing|bitiriş)\s*:?\s+(.+)$/i);
+  return finishing ? finishing[1] : line;
+}
+
+export function analyzeProject(source) {
+  const parts = [];
+  const seenNames = new Map();
+  let current = null;
+  let introduction = false;
+
+  function addPart(name, key) {
+    const part = { id: key, name, lines: [] };
+    parts.push(part);
+    return part;
+  }
+
+  for (const line of source.split(/\r?\n/)) {
+    const heading = line.match(/^\s*#{1,6}\s+(.+?)\s*#*\s*$/);
+    const simple = line.match(/^\s*(the pattern|body|ears?|hat|gövde|kulak(?:lar)?|şapka)\s*:?\s*$/i);
+    if (heading || simple) {
+      const label = (heading ?? simple)[1].trim();
+      const normalized = label.toLocaleLowerCase("tr");
+      if (!current && /^(?:the pattern|pattern|tarif|örgü tarifi)$/.test(normalized)) {
+        introduction = true;
+        continue;
+      }
+      const occurrence = (seenNames.get(normalized) ?? 0) + 1;
+      seenNames.set(normalized, occurrence);
+      current = addPart(occurrence === 1 ? label : label + " " + occurrence, "section:" + normalized + ":" + occurrence);
+      introduction = false;
+    } else if (!introduction) {
+      if (!current && !line.trim()) continue;
+      current ??= addPart("Ana parça", "default");
+      current.lines.push(normalizeProjectLine(line));
+    }
+  }
+
+  if (!parts.length) addPart("Ana parça", "default");
+  return parts.map(({ lines, ...part }) => ({ ...part, rows: analyzePattern(lines.join("\n")) }));
+}

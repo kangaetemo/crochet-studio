@@ -230,3 +230,35 @@ dialog p { color: var(--quiet); font-size: .87rem; }
   .preview-footer { gap: 9px; }
   .round-row { grid-template-columns: 48px minmax(0, 1fr) 62px; gap: 5px; }
 }
+
+.part-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  color: var(--quiet);
+  font-size: .83rem;
+}
+.part-controls > label { font-weight: 650; }
+.part-controls select {
+  max-width: min(100%, 260px);
+  padding: 5px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+}
+.part-controls details { flex: 1 1 100%; }
+.part-controls summary { cursor: pointer; color: var(--plum); }
+.part-sliders { display: grid; gap: 4px; margin-top: 8px; }
+.part-sliders label {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.part-sliders input { width: 100%; min-width: 0; accent-color: var(--plum); }
+.part-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 7px; }
+.part-actions .button { padding: 5px 8px; }

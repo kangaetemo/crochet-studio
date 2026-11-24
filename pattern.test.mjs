@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzePattern } from "./docs/pattern.mjs";
+import { analyzePattern, analyzeProject } from "./docs/pattern.mjs";
+import { layoutParts, defaultRoundColor } from "./docs/scene.mjs";
 
 test("parses each requested stitch, including both explicit reductions", () => {
   const cases = [
@@ -70,4 +71,39 @@ test("does not guess a repeat without a compatible target and preceding round", 
   assert.equal(rows[1].made, 8);
   assert.match(rows[1].issue, /ilmek eksik/);
   assert.equal(rows[1].note, undefined);
+});
+
+test("opens copied parts with independent round numbering and preserves repeated names", () => {
+  const source = [
+    "## The pattern", "", "Each line is one round.", "", "### Body",
+    "1. **Round 1**6sc in magic ring", "2. **Round 2**6inc",
+    "3. **Finishing**fasten off", "### Ears", "1. **Round 1**3 hdc",
+    "2. **Round 2**3 hdc", "### Ears", "1. **Round 1**3 hdc",
+    "2. **Round 2**3 hdc", "### Hat", "1. **Round 1**6 sc in ring",
+    "2. **Round 2**(sc, inc)x3"
+  ].join("\n");
+  const parts = analyzeProject(source);
+  assert.deepEqual(parts.map((part) => part.name), ["Body", "Ears", "Ears 2", "Hat"]);
+  assert.equal(new Set(parts.map((part) => part.id)).size, 4);
+  assert.deepEqual(parts.map((part) => part.rows.map((row) => row.made)), [[6, 12], [3, 3], [3, 3], [6, 9]]);
+  assert.ok(parts.every((part) => part.rows.every((row) => row.preview)));
+});
+
+test("keeps errors local to one piece and retains an implicit single piece", () => {
+  const project = analyzeProject("Gövde\nRound 1 6 sc\nR2: 5 inc\nŞapka:\nR1: 6 sc\nR2: 6 inc");
+  assert.equal(project.length, 2);
+  assert.deepEqual(project.map((part) => part.rows.map((row) => row.preview)), [[true, false], [true, true]]);
+  assert.deepEqual(analyzeProject("R1: 6 sc\nRound 2  : 6 inc")[0].rows.map((row) => row.made), [6, 12]);
+  assert.equal(analyzeProject("R1: 6 sc")[0].id, "default");
+});
+
+test("places duplicate ears on opposite sides and flips the hat over the body", () => {
+  const parts = analyzeProject("### Gövde\n6 sc\n6 inc\n### Kulak\n4 hdc\n### Kulak\n4 hdc\n### Şapka\n6 sc\n6 inc");
+  const placements = layoutParts(parts);
+  const [body, firstEar, secondEar, hat] = parts.map((part) => placements.get(part.id));
+  assert.equal(body.y, 0);
+  assert.ok(firstEar.x < body.x && secondEar.x > body.x);
+  assert.ok(hat.y > body.y);
+  assert.equal(hat.flipped, true);
+  assert.notEqual(defaultRoundColor(parts[0], 1), defaultRoundColor(parts[3], 1));
 });

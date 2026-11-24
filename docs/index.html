@@ -46,6 +46,7 @@
           <p><code>sc</code>, <code>inc</code>, <code>dec</code>, <code>hdc</code>, <code>dc</code>, <code>slst</code>, <code>bob</code>, <code>FLO</code>, <code>BLO</code>, <code>hdc inc</code>, <code>hdc dec</code>, <code>dc inc</code>, <code>dc dec</code></p>
           <p><code>X</code>, <code>V</code>, <code>A</code>, <code>SH</code>, <code>hdc2tog</code>, <code>dc2tog</code> ve <code>ch</code> da kullanılabilir.</p>
           <p><code>R3: (sc, inc) x6 (18)</code> ve <code>3. tur: (X, V) × 6 = 18</code> aynı sonucu verir. <code>R5-8: 24 sc</code> dört tur ekler.</p>
+          <p>Parçaları <code>### Gövde</code>, <code>### Sol kulak</code> ve <code>### Şapka</code> gibi başlıklarla ayır. Her parçanın tur numarası 1’den başlayabilir.</p>
           <p><code>-sc2, inc4, sc6 16</code> gibi kısa notlar da olur. <code>-6</code> ve <code>-12x3?</code> gibi yalnız sayı içeren satırlarda ilmekler tahmin edilir. Soru işareti tekrarın kesin olmadığını gösterir.</p>
         </details>
       </section>
@@ -57,6 +58,22 @@
             <p>Modeli sürükleyerek döndür.</p>
           </div>
           <span id="preview-state" class="preview-state"></span>
+        </div>
+        <div id="part-controls" class="part-controls" hidden>
+          <label for="part-select">Parça</label>
+          <select id="part-select"></select>
+          <details id="part-placement">
+            <summary>Parçayı konumlandır</summary>
+            <div class="part-sliders">
+              <label>Sol / sağ <input id="part-x" type="range" min="-20" max="20" step="0.5" value="0"></label>
+              <label>Aşağı / yukarı <input id="part-y" type="range" min="-20" max="20" step="0.5" value="0"></label>
+              <label>Arka / ön <input id="part-z" type="range" min="-20" max="20" step="0.5" value="0"></label>
+            </div>
+            <div class="part-actions">
+              <label><input id="part-reverse" type="checkbox"> Ters çevir</label>
+              <button id="reset-part" class="button secondary" type="button">Konumu sıfırla</button>
+            </div>
+          </details>
         </div>
         <div class="stage">
           <canvas id="model" tabindex="0" aria-label="Döndürülebilir örgü modeli. Ok tuşlarıyla döndür."></canvas>
