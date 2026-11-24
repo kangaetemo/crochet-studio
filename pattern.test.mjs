@@ -165,6 +165,34 @@ test("recognizes the winter assembly and places its details without changing cou
   assert.deepEqual(hat.rows.map((row) => row.made), [4, 8, 4, 8, 8]);
 });
 
+test("keeps the pasted polar bear wider than it is tall in both previews", () => {
+  const bodyPattern = [
+    "6 sc in magic ring", "6 inc", "(sc, inc) x6", "(sc, inc, sc) x6", "(3 sc, inc) x6",
+    "30 sc", "(5 sc, inc) x5", "R8-9: 35 sc", "11 sc, bob, 11 sc, bob, 11 sc",
+    "R11-14: 35 sc", "11 sc, bob, 11 sc, bob, 11 sc", "(sc, dec) x11, 2 sc", "12 dec", "6 dec"
+  ].join("\n");
+  const single = analyzeProject(bodyPattern);
+  const assembled = analyzeProject("### Body\n" + bodyPattern +
+    "\n### Ears\n5 hdc\n### Ears\n5 hdc\n### Hat\n5 sc\n5 inc\n5 dec\n5 inc");
+  const winter = resolveAppearance(assembled);
+  assert.equal(winter, "winter");
+
+  for (const [parts, appearance] of [[single, "plain"], [assembled, winter]]) {
+    const body = parts[0];
+    assert.equal(body.rows.length, 18);
+    assert.ok(body.rows.every((row) => row.preview));
+    assert.deepEqual(body.rows.slice(-3).map((row) => row.made), [24, 12, 6]);
+    const placement = layoutParts(parts, appearance).get(body.id);
+    const totalHeight = body.rows.reduce((sum, row) => sum + row.height, 0);
+    const diameter = Math.max(...body.rows.map((row) => row.made)) * placement.widthScale / Math.PI;
+    const aspectRatio = totalHeight * placement.heightScale / diameter;
+    assert.ok(aspectRatio >= 0.75 && aspectRatio <= 0.85);
+  }
+
+  const open = analyzeProject(bodyPattern.split("\n").slice(0, -3).join("\n"));
+  assert.equal(layoutParts(open).get(open[0].id).heightScale, 1);
+});
+
 test("builds bounded, closed surface geometry from valid rounds", () => {
   const rounds = analyzePattern("R1: 6 sc\nR2: 6 inc\nR3: 12 sc\nR4: 6 dec");
   const rings = rounds.map((row, i) => ({

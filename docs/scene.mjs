@@ -24,6 +24,12 @@ function hasPom(rows) {
   return counts.length === 4 && counts[0] < counts[1] && counts[1] > counts[2] && counts[2] < counts[3];
 }
 
+function hasBobblePairs(rows) {
+  return rows.filter((row) =>
+    row.preview && row.stitches.filter((stitch) => stitch.name === "bobble").length === 2
+  ).length >= 2;
+}
+
 export function resolveAppearance(parts, choice = "auto") {
   if (choice === "plain") return "plain";
   const body = parts.find((part) => partKind(part.name) === "body");
@@ -31,8 +37,7 @@ export function resolveAppearance(parts, choice = "auto") {
   if (!body || !hat) return "plain";
   if (choice === "winter") return "winter";
   const ears = parts.filter((part) => partKind(part.name) === "ear");
-  const bobbleRows = body.rows.filter((row) => row.preview && row.stitches.filter((stitch) => stitch.name === "bobble").length === 2);
-  return ears.length === 2 && bobbleRows.length >= 2 && hasPom(hat.rows) ? "winter" : "plain";
+  return ears.length === 2 && hasBobblePairs(body.rows) && hasPom(hat.rows) ? "winter" : "plain";
 }
 
 export function defaultRoundColor(part, number, appearance = "plain") {
@@ -51,12 +56,23 @@ export function layoutParts(parts, appearance = "plain") {
   const dimensions = parts.map((part) => {
     const rounds = part.rows.filter((row) => row.preview);
     const kind = partKind(part.name);
-    const heightScale = winter && kind === "body" ? 0.82 : winter && kind === "hat" ? 0.88 : 1;
+    const height = rounds.reduce((sum, row) => sum + row.height, 0);
+    const radius = rounds.reduce((max, row) => Math.max(max, row.made / TAU), 0.55);
     const widthScale = winter && kind === "ear" ? 1.14 : 1;
+    let heightScale = winter && kind === "body" ? 0.82 : winter && kind === "hat" ? 0.88 : 1;
+    const bearBody = (kind === "body" && winter)
+      || ((kind === "body" || (parts.length === 1 && part.id === "default")) && hasBobblePairs(rounds));
+    const lastCount = rounds.at(-1)?.made ?? 0;
+    const closed = rounds.length >= 5 && lastCount <= 6 && lastCount / TAU < radius * 0.7;
+    if (bearBody && closed) {
+      // The stuffed bear is wider than it is tall. Fit both pasted bodies and the assembled preset.
+      const diameter = 2 * radius;
+      heightScale = Math.min(heightScale, 0.8 * diameter / height);
+    }
     return {
       id: part.id, kind, heightScale, widthScale,
-      height: rounds.reduce((sum, row) => sum + row.height, 0) * heightScale,
-      radius: rounds.reduce((radius, row) => Math.max(radius, row.made / TAU), 0.55) * widthScale
+      height: height * heightScale,
+      radius: radius * widthScale
     };
   });
   const living = dimensions.filter((part) => part.height > 0);
@@ -278,22 +294,24 @@ export function createScene(canvas, onPick) {
 
       for (const [index, ring] of rings.entries()) {
         const step = TAU / ring.stitches.length;
-        const bottomRadius = (ring.radius + (rings[index - 1]?.radius ?? ring.radius * 0.5)) * 0.5;
+        const previousRing = rings[index - 1];
+        const bottomRadius = (ring.radius + (previousRing?.radius ?? ring.radius * 0.5)) * 0.5;
         const topRadius = (ring.radius + (rings[index + 1]?.radius ?? ring.radius * 0.66)) * 0.5;
+        const top = ring.height;
+        const roundHeight = top - (previousRing?.height ?? 0);
+        const bottom = top - roundHeight * 0.89;
         for (let stitchIndex = 0; stitchIndex < ring.stitches.length; stitchIndex += firstStep) {
           const stitch = ring.stitches[stitchIndex];
           const angle = step * stitchIndex + index * phaseStep + phase;
-          const top = ring.height;
-          const bottom = top - ring.row.height * 0.89;
           const bump = stitch.name === "bobble";
           const loopDepth = stitch.loop === "flo" ? 0.11 : stitch.loop === "blo" ? -0.09 : 0;
           const lip = loopDepth + (bump && model.winter ? 0.53 : 0);
           const center = projectStitch(angle, (top + bottom) * 0.5, ring.radius + lip);
           const v = [
             projectStitch(angle - step * 0.42, top, topRadius + lip),
-            projectStitch(angle - step * 0.20, bottom + ring.row.height * 0.2, bottomRadius + lip),
+            projectStitch(angle - step * 0.20, bottom + roundHeight * 0.2, bottomRadius + lip),
             projectStitch(angle, bottom, bottomRadius + lip),
-            projectStitch(angle + step * 0.2, bottom + ring.row.height * 0.2, bottomRadius + lip),
+            projectStitch(angle + step * 0.2, bottom + roundHeight * 0.2, bottomRadius + lip),
             projectStitch(angle + step * 0.42, top, topRadius + lip)
           ];
           const shadeAngle = flip * angle + view.yaw;
